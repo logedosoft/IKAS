@@ -1,7 +1,7 @@
 app_name = "ikas"
 app_title = "Ikas ERPNext"
 app_publisher = "Logedosoft"
-app_description = "IKAS - ERPNext Integration"
+app_description = "Ikas - ERPNext Integration"
 app_email = "info@logedosoft.com"
 app_license = "mit"
 

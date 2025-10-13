@@ -3,7 +3,7 @@ name = "ikas"
 authors = [
     { name = "Logedosoft", email = "info@logedosoft.com"}
 ]
-description = "IKAS - ERPNext Integration"
+description = "Ikas - ERPNext Integration"
 requires-python = ">=3.10"
 readme = "README.md"
 dynamic = ["version"]

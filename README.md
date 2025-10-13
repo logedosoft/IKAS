@@ -1,6 +1,6 @@
 ### Ikas ERPNext
 
-IKAS - ERPNext Integration
+Ikas - ERPNext Integration
 
 ### Installation
 
