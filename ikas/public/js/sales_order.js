@@ -10,12 +10,17 @@ function get_ikas_order(frm) {
 		fieldtype: 'Int'
 	}, (values) => {
 		frappe.call({
-			method: 'ikas.ikas_utils.get_ikas_order_info',
+			method: 'ikas.ikas_utils.process_ikas_order',
 			args: {
 				order_id: values.order_id
 			},
 			callback: (r) => {
 				console.log(r);
+				if (r.message.op_result == false) {
+					frappe.throw(r.message.op_message);
+				} else {
+
+				}
 			}
 		})
 	});
