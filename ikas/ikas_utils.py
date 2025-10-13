@@ -66,10 +66,6 @@ def get_ikas_order_info(order_id):
 
 		response = requests.post(api_url, json=query, headers=headers)
 
-		frappe.log_error("IKAS 4", response.text)
-		frappe.log_error("IKAS 5", response.content)
-		frappe.log_error("IKAS 6", frappe.as_json(response.json()))
-
 		if response.status_code != 200:
 			dctResult = {'op_result': False, 'op_message': f"Get Order API failed with status {response.status_code}. Reason: {response.text}"}
 		else:
@@ -93,7 +89,37 @@ def process_ikas_order(order_id):
 		dctResult['op_result'] = False
 		dctResult['op_message'] = dctOrderInfo['op_message']
 	else:
+		#We Get the order info
 		dctResult['op_result'] = True
-		dctResult['order_info'] = dctOrderInfo['order_info']
+		
+		order = dctOrderInfo['order_info']['data']['listOrder']['data'][0]
+		customer = order.get('customer', {})
+
+		first_name = customer.get('firstName', '')
+		last_name = customer.get('lastName', '')
+
+		#Create new customer with first and last name
+		"""docCustomer = frappe.new_doc('Customer')
+		docCustomer.customer_name = f"{first_name} {last_name}"
+		docCustomer.payment_terms = "%50 CASH %50 60 DAYS"
+		docCustomer.customer_type = "Company"
+		docCustomer.customer_group = "Individual"
+		docCustomer.custom_ld_country = "United States"
+		docCustomer.save()
+
+		#Creat address first
+		docAddress = frappe.new_doc('Address')
+		docAddress.address_title = f"{first_name} {last_name}"
+		docAddress.address_type = "Shipping"
+		docAddress.address_line1 = "ASD"
+		docAddress.address_line2 = "TEST"
+		docAddress.city = order.get('shippingAddress', {}).get('city', {}).get('name', '')
+		docAddress.country = "Turkey"
+		docAddress.append("links", {
+			"link_doctype": "Customer", 
+			"link_name": docCustomer.name})
+		docAddress.save()
+
+		print(f"FN = {first_name}, LN = {last_name}")"""
 
 	return dctResult
