@@ -7,36 +7,8 @@ from frappe import msgprint, _
 from frappe.model.document import Document
 from frappe.utils import cint, flt
 
-def get_ikas_auth_token():
-	import requests
-	#Get Auth Token from https://api.myikas.com/api/v1/admin/graphql API
 
-	dctResult = {
-		'op_result': False,
-		'op_message': '',
-		'auth_token': ''
-	}
 
-	api_url = "https://kayaoglulokum.myikas.com/api/admin/oauth/token"
-	headers = {
-		'Content-Type': 'application/x-www-form-urlencoded'
-	}
-
-	payload = {
-		"grant_type": "client_credentials",
-		"client_id": "0e80d184-d742-49d7-94b3-8585d31ae13a",
-		"client_secret": "s_1QoGh4p6O218QxZF1Q5my0jU4780825100754bf2baee5bd8a96ef41a"
-	}
-
-	response = requests.post(api_url, data=payload, headers=headers)
-
-	if response.status_code != 200:
-		dctResult = {'op_result': False, 'op_message': f"API failed with status {response.status_code}. Reason: {response.text}"}
-	else:
-		api_data = response.json()
-		dctResult = {'op_result': True, 'auth_token': api_data.get('access_token')}
-
-	return dctResult
 
 def get_ikas_order_info(order_id):
 	import requests
@@ -48,16 +20,15 @@ def get_ikas_order_info(order_id):
 		'order_info': ''
 	}
 
-	token = get_ikas_auth_token()
+	token = frappe.db.get_single_value('IKAS Settings', 'token')
 
-	if token['op_result'] == False:
-		dctResult['op_result'] = False
-		dctResult['op_message'] = token['op_message']
-	else:
+	#print(token)
+
+	if token:
 		api_url = "https://api.myikas.com/api/v1/admin/graphql"
 		headers = {
 			'Content-Type': 'application/json',
-			'Authorization': "Bearer " + token['auth_token']
+			'Authorization': "Bearer " + token
 		}
 
 		query = {
@@ -66,10 +37,14 @@ def get_ikas_order_info(order_id):
 
 		response = requests.post(api_url, json=query, headers=headers)
 
+		
+
 		if response.status_code != 200:
 			dctResult = {'op_result': False, 'op_message': f"Get Order API failed with status {response.status_code}. Reason: {response.text}"}
 		else:
 			dctResult = {'op_result': True, 'order_info': response.json()}
+
+		#print(dctResult)
 
 	return dctResult
 
@@ -99,14 +74,15 @@ def process_ikas_order(order_id):
 		last_name = customer.get('lastName', '')
 
 		#Create new customer with first and last name
-		"""docCustomer = frappe.new_doc('Customer')
-		docCustomer.customer_name = f"{first_name} {last_name}"
-		docCustomer.payment_terms = "%50 CASH %50 60 DAYS"
-		docCustomer.customer_type = "Company"
-		docCustomer.customer_group = "Individual"
-		docCustomer.custom_ld_country = "United States"
-		docCustomer.save()
-
+		#docCustomer = frappe.new_doc('Customer')
+		#docCustomer.customer_name = f"{first_name} {last_name}"
+		#docCustomer.payment_terms = "%50 CASH %50 60 DAYS"
+		#docCustomer.customer_type = "Company"
+		#docCustomer.customer_group = "Individual"
+		#docCustomer.custom_ld_country = "United States"
+		#docCustomer.save()
+		Defaut_Custumer = frappe.db.get_single_value('IKAS Settings', 'custumer_name')
+		print(Defaut_Custumer)
 		#Creat address first
 		docAddress = frappe.new_doc('Address')
 		docAddress.address_title = f"{first_name} {last_name}"
@@ -117,9 +93,53 @@ def process_ikas_order(order_id):
 		docAddress.country = "Turkey"
 		docAddress.append("links", {
 			"link_doctype": "Customer", 
-			"link_name": docCustomer.name})
+			"link_name": Defaut_Custumer})
 		docAddress.save()
 
-		print(f"FN = {first_name}, LN = {last_name}")"""
+		print(f"FN = {first_name}, LN = {last_name}")
+
+	return dctResult
+
+@frappe.whitelist()
+def process_ikas_auth(store_name=None, client_id=None, client_secret=None):
+	import requests
+
+	dctResult = {
+		'op_result': False,
+		'op_message': '',
+		'auth_token': ''
+	}
+
+	try:
+		# API URL'ini dinamik olarak store_name'den oluştur (örn. kayaoglulokum.myikas.com)
+		api_url = f"{store_name}"
+
+		headers = {'Content-Type': 'application/x-www-form-urlencoded'}
+		payload = {
+			"grant_type": "client_credentials",
+			"client_id": client_id,
+			"client_secret": client_secret
+		}
+
+		response = requests.post(api_url, data=payload, headers=headers)
+
+		if response.status_code != 200:
+			dctResult = {
+				'op_result': False,
+				'op_message': f"API bağlantısı başarısız! Kod: {response.status_code}\n{response.text}"
+			}
+		else:
+			api_data = response.json()
+			dctResult = {
+				'op_result': True,
+				'op_message': "IKAS bağlantısı başarılı ✅",
+				'auth_token': api_data.get('access_token')
+			}
+
+	except Exception as e:
+		dctResult = {
+			'op_result': False,
+			'op_message': f"Hata oluştu: {str(e)}"
+		}
 
 	return dctResult

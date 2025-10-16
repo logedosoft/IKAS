@@ -1,0 +1,105 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "creation": "2025-10-15 21:31:24.230835",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "integration_information_section",
+  "store_name",
+  "client_id",
+  "client_secret",
+  "connection_check",
+  "token_valid_upto",
+  "token",
+  "settings_section",
+  "custumer_name",
+  "order_auto_confirm"
+ ],
+ "fields": [
+  {
+   "fieldname": "integration_information_section",
+   "fieldtype": "Section Break",
+   "label": "Integration Information"
+  },
+  {
+   "fieldname": "store_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Store Name",
+   "reqd": 1
+  },
+  {
+   "fieldname": "client_id",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Client Id",
+   "reqd": 1
+  },
+  {
+   "fieldname": "client_secret",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Client Secret",
+   "reqd": 1
+  },
+  {
+   "fieldname": "token_valid_upto",
+   "fieldtype": "Datetime",
+   "label": "Token Valid Upto",
+   "read_only": 1
+  },
+  {
+   "fieldname": "token",
+   "fieldtype": "Small Text",
+   "label": "Token"
+  },
+  {
+   "fieldname": "settings_section",
+   "fieldtype": "Section Break",
+   "label": "Settings"
+  },
+  {
+   "fieldname": "custumer_name",
+   "fieldtype": "Link",
+   "label": "Customer Name",
+   "options": "Customer"
+  },
+  {
+   "default": "0",
+   "fieldname": "order_auto_confirm",
+   "fieldtype": "Check",
+   "label": "Order Auto Confirm"
+  },
+  {
+   "fieldname": "connection_check",
+   "fieldtype": "Button",
+   "label": "Connection Check"
+  }
+ ],
+ "grid_page_length": 50,
+ "index_web_pages_for_search": 1,
+ "issingle": 1,
+ "links": [],
+ "modified": "2025-10-16 00:05:05.183299",
+ "modified_by": "Administrator",
+ "module": "Ikas ERPNext",
+ "name": "IKAS Settings",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "row_format": "Dynamic",
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}
