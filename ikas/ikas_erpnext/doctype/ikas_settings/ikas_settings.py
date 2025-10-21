@@ -1,9 +1,8 @@
-# Copyright (c) 2025, Logedosoft and contributors
-# For license information, please see license.txt
+# -*- coding: utf-8 -*-
+# LOGEDOSOFT
 
-# import frappe
+import frappe
 from frappe.model.document import Document
 
-
 class IKASSettings(Document):
-	pass
+    pass
