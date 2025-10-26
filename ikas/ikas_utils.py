@@ -283,32 +283,60 @@ def process_ikas_order(order_id,doc):
     if existing_so:
         frappe.throw(f"Bu sipariş ({order_id}) daha önce aktarılmış.")
 
-
     customer_data = order.get('customer', {})
     first_name = customer_data.get('firstName', '')
     last_name = customer_data.get('lastName', '')
 
-    default_customer_name = frappe.db.get_single_value('IKAS Settings', 'custumer_name')
 
-    # Adres zaten var mı kontrol et
-    existing_address = frappe.db.exists("Address", {"address_title": f"{first_name} {last_name.strip()}"})
-    # Müşteri ve adres oluşturma
+    email_id = order.get('customer', {}).get('email', '').strip()
+    default_customer_name = frappe.db.get_single_value('IKAS Settings', 'customer_name')
+
+    customer_for_order = None  # Her durumda tanımlı olsun
+
+    # Adres tablosunda email_id kontrolü
+    existing_address_name = frappe.db.get_value("Address", {"email_id": email_id}, "name")
+
     if default_customer_name:
-         if not existing_address:
-        # Default müşteri varsa sadece adres oluştur
+        if existing_address_name:
+            # Adres var, Dynamic Link ekle
+            docAddress = frappe.get_doc("Address", existing_address_name)
+            # Önce aynı link daha önce eklenmiş mi kontrol et
+            existing_link = any(link.link_name == default_customer_name and link.link_doctype == "Customer"
+                                for link in docAddress.links)
+            if not existing_link:
+                docAddress.append("links", {
+                    "link_doctype": "Customer",
+                    "link_name": default_customer_name
+                })
+                docAddress.save(ignore_permissions=True)
+            customer_for_order = default_customer_name
+        else:
+            # Adres yoksa, sadece adres oluştur
             create_address(order, default_customer_name, first_name, last_name)
             customer_for_order = default_customer_name
-     # Yeni müşteri oluşturulmadan önce adres var mı kontrol et
-    if existing_address:
-        # Adres varsa, bağlı müşteri adını al
-        existing_customer = frappe.db.get_value("Dynamic Link",
-            {"parent": existing_address, "link_doctype": "Customer"}, "link_name"
-        )
 
-        if existing_customer:
-            customer_for_order = existing_customer
+    else:
+        if existing_address_name:
+            # Email zaten varsa → mevcut müşteriyi al
+            existing_customer = frappe.db.get_value(
+                "Dynamic Link",
+                {"parent": existing_address_name, "link_doctype": "Customer"},
+                "link_name"
+            )
+            if existing_customer:
+                customer_for_order = existing_customer
+            else:
+                # Adres var ama bağlı müşteri yoksa yeni müşteri oluştur
+                docCustomer = frappe.new_doc('Customer')
+                docCustomer.customer_name = f"{first_name} {last_name.strip()}"
+                docCustomer.customer_type = "Company"
+                docCustomer.customer_group = "Individual"
+                docCustomer.save()
+
+                create_address(order, docCustomer.name, first_name, last_name)
+                customer_for_order = docCustomer.name
         else:
-            # Adres var ama müşterisi yoksa yeni müşteri oluştur
+            # Email yoksa → tamamen yeni müşteri ve adres oluştur
             docCustomer = frappe.new_doc('Customer')
             docCustomer.customer_name = f"{first_name} {last_name.strip()}"
             docCustomer.customer_type = "Company"
@@ -317,19 +345,14 @@ def process_ikas_order(order_id,doc):
 
             create_address(order, docCustomer.name, first_name, last_name)
             customer_for_order = docCustomer.name
-    else:
-        # Adres yoksa tamamen yeni müşteri oluştur
-        docCustomer = frappe.new_doc('Customer')
-        docCustomer.customer_name = f"{first_name} {last_name.strip()}"
-        docCustomer.customer_type = "Company"
-        docCustomer.customer_group = "Individual"
-        docCustomer.save()
 
-
+    # Artık customer_for_order her durumda dolu
     doc.customer = customer_for_order
     doc.customer_name = customer_for_order
     doc.customer_address = f"{first_name} {last_name.strip()}-Shipping"
-    doc.po_no=order_id
+    doc.po_no = order_id
+
+
 
 
     ordered_at = order.get('orderedAt', '')

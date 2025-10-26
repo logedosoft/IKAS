@@ -13,7 +13,7 @@
   "token_valid_upto",
   "token",
   "settings_section",
-  "custumer_name",
+  "customer_name",
   "order_auto_confirm"
  ],
  "fields": [
@@ -60,12 +60,6 @@
    "label": "Settings"
   },
   {
-   "fieldname": "custumer_name",
-   "fieldtype": "Link",
-   "label": "Customer Name",
-   "options": "Customer"
-  },
-  {
    "default": "0",
    "fieldname": "order_auto_confirm",
    "fieldtype": "Check",
@@ -75,13 +69,19 @@
    "fieldname": "connection_check",
    "fieldtype": "Button",
    "label": "Connection Check"
+  },
+  {
+   "fieldname": "customer_name",
+   "fieldtype": "Link",
+   "label": "Customer Name",
+   "options": "Customer"
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "issingle": 1,
  "links": [],
- "modified": "2025-10-16 00:05:05.183299",
+ "modified": "2025-10-27 01:05:57.354675",
  "modified_by": "Administrator",
  "module": "Ikas ERPNext",
  "name": "IKAS Settings",
