@@ -3,11 +3,9 @@
 
 import frappe, json
 from frappe import msgprint, _
-
 from frappe.model.document import Document
 from frappe.utils import cint, flt
 from frappe.utils import now_datetime
-
 from datetime import datetime
 
 
@@ -35,7 +33,46 @@ def process_ikas_auth(store_name, client_id, client_secret):
 
 def get_ikas_order_info(order_id):
     import requests
+    from datetime import datetime, timedelta
     token = frappe.db.get_single_value('IKAS Settings', 'token')
+    token_valid_upto = frappe.db.get_single_value('IKAS Settings', 'token_valid_upto')
+
+    store_name = frappe.db.get_single_value('IKAS Settings', 'store_name')
+    client_id = frappe.db.get_single_value('IKAS Settings', 'client_id')
+    client_secret = frappe.db.get_single_value('IKAS Settings', 'client_secret')
+
+    now = datetime.now()
+    needs_refresh = False
+
+    # Token süresi kontrolü
+    if not token_valid_upto:
+        needs_refresh = True
+    else:
+        if isinstance(token_valid_upto, str):
+            try:
+                token_valid_upto = datetime.strptime(token_valid_upto, "%Y-%m-%d %H:%M:%S")
+            except Exception:
+                token_valid_upto = now - timedelta(hours=5)
+        if now > token_valid_upto:
+            needs_refresh = True
+
+    if needs_refresh:
+        frappe.logger().info("🔄 IKAS token süresi geçmiş veya bulunamadı, yenileniyor...")
+        result = process_ikas_auth(store_name, client_id, client_secret)
+
+        if result.get("op_result"):
+            new_token = result.get("auth_token")
+
+            # Yeni token ve 4 saat sonraki bitiş zamanını kaydet
+            frappe.db.set_value('IKAS Settings', None, 'token', new_token)
+            frappe.db.set_value('IKAS Settings', None, 'token_valid_upto', now + timedelta(hours=4))
+            frappe.db.commit()
+            frappe.clear_cache(doctype="IKAS Settings")
+
+            token = new_token
+        else:
+            frappe.throw(f"Token yenileme başarısız: {result.get('op_message')}")
+
 
     api_url = "https://api.myikas.com/api/v1/admin/graphql"
     headers = {
@@ -239,7 +276,6 @@ def process_ikas_order(order_id,doc):
     else:
         order = order_list[0]
 
-    
 
     # Daha önce aktarılmış mı kontrol et
     existing_so = frappe.db.exists("Sales Order", {"po_no": order_id})
@@ -324,8 +360,6 @@ def process_ikas_order(order_id,doc):
         variant_value_names = ', '.join([v.get('variantValueName', '') for v in variant_values])
         variant_uom = variant_values[0].get('variantTypeName', '') if variant_values else ''
 
-
-        
         # itemname = ürün adı + variant değerleri
         itemname = variant.get('name', '')
         if variant_value_names:
