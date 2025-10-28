@@ -20,8 +20,9 @@ def process_ikas_auth(store_name, client_id, client_secret):
 			"client_id": client_id,
 			"client_secret": client_secret
 		}
-	
-    response = requests.post(api_url, data=payload, headers=headers)
+    frappe.log_error("as1",payload)
+    response = requests.post(api_url, data=payload, headers=headers ,timeout=1)
+    frappe.log_error("as2",response)
     if response.status_code != 200:
         return {"op_result": False, "op_message": f"Token API failed: {response.text}"}
     data = response.json()
@@ -43,23 +44,19 @@ def get_ikas_order_info(order_id):
 
     now = datetime.now()
     needs_refresh = False
-
+    
     # Token süresi kontrolü
-    if not token_valid_upto:
+    if not token_valid_upto or  str(token_valid_upto) == "0001-01-01 00:00:00":
         needs_refresh = True
+        frappe.log_error("t1",token_valid_upto)
     else:
-        if isinstance(token_valid_upto, str):
-            try:
-                token_valid_upto = datetime.strptime(token_valid_upto, "%Y-%m-%d %H:%M:%S")
-            except Exception:
-                token_valid_upto = now - timedelta(hours=5)
+        frappe.log_error("t0",token_valid_upto)
         if now > token_valid_upto:
             needs_refresh = True
 
     if needs_refresh:
-        frappe.logger().info("🔄 IKAS token süresi geçmiş veya bulunamadı, yenileniyor...")
         result = process_ikas_auth(store_name, client_id, client_secret)
-
+        frappe.log_error("t3",result)
         if result.get("op_result"):
             new_token = result.get("auth_token")
 
@@ -71,8 +68,7 @@ def get_ikas_order_info(order_id):
 
             token = new_token
         else:
-            frappe.throw(f"Token yenileme başarısız: {result.get('op_message')}")
-
+            frappe.log_error("İkas token Yenileme Hatası",f"Token yenileme başarısız: {result.get('op_message')}")
 
     api_url = "https://api.myikas.com/api/v1/admin/graphql"
     headers = {
@@ -314,7 +310,7 @@ def process_ikas_order(order_id,doc):
             # Adres yoksa, sadece adres oluştur
             create_address(order, default_customer_name, first_name, last_name)
             customer_for_order = default_customer_name
-
+    #Setting de customer_name yoksa
     else:
         if existing_address_name:
             # Email zaten varsa → mevcut müşteriyi al
@@ -441,9 +437,11 @@ def process_ikas_order(order_id,doc):
 
     return dctResult
 
-def create_address(order, customer_name, first_name, last_name):
+def create_address(order, customer_name, first_name, last_name,):
     """Shipping Address oluşturur ve Customer ile ilişkilendirir"""
+    
     docAddress = frappe.new_doc('Address')
+    docAddress.email_id = order.get('customer', {}).get('email', '')
     docAddress.address_title = f"{first_name} {last_name}"
     docAddress.address_type = "Shipping"
     docAddress.address_line1 = order.get('shippingAddress', {}).get('addressLine1', '')
@@ -453,7 +451,7 @@ def create_address(order, customer_name, first_name, last_name):
     if country == "Türkiye":
         country = "Turkey"
     docAddress.country = country
-    docAddress.email_id = order.get('customer', {}).get('email', '')
+    
     docAddress.phone = order.get('customer', {}).get('phone', '')
 
     docAddress.append("links", {

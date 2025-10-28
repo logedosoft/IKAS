@@ -14,7 +14,9 @@
   "token",
   "settings_section",
   "customer_name",
-  "order_auto_confirm"
+  "order_auto_confirm",
+  "notification_mail",
+  "last_order_no"
  ],
  "fields": [
   {
@@ -75,13 +77,25 @@
    "fieldtype": "Link",
    "label": "Customer Name",
    "options": "Customer"
+  },
+  {
+   "fieldname": "notification_mail",
+   "fieldtype": "Data",
+   "label": "Notification Mail",
+   "options": "Email"
+  },
+  {
+   "fieldname": "last_order_no",
+   "fieldtype": "Data",
+   "label": "Last Order No",
+   "read_only": 1
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "issingle": 1,
  "links": [],
- "modified": "2025-10-27 01:05:57.354675",
+ "modified": "2025-10-28 15:31:50.050874",
  "modified_by": "Administrator",
  "module": "Ikas ERPNext",
  "name": "IKAS Settings",
