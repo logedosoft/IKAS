@@ -35,22 +35,26 @@ def process_ikas_auth(store_name, client_id, client_secret):
 def get_ikas_order_info(order_id):
     import requests
     from datetime import datetime, timedelta
-    token = frappe.db.get_single_value('IKAS Settings', 'token')
-    token_valid_upto = frappe.db.get_single_value('IKAS Settings', 'token_valid_upto')
-
-    store_name = frappe.db.get_single_value('IKAS Settings', 'store_name')
-    client_id = frappe.db.get_single_value('IKAS Settings', 'client_id')
-    client_secret = frappe.db.get_single_value('IKAS Settings', 'client_secret')
+    settings = frappe.get_single("IKAS Settings")
+    token = settings.token
+    token_valid_upto = settings.token_valid_upto
+    store_name = settings.store_name
+    client_id = settings.client_id
+    client_secret = settings.client_secret
 
     now = datetime.now()
     needs_refresh = False
     
     # Token süresi kontrolü
-    if not token_valid_upto or  str(token_valid_upto) == "0001-01-01 00:00:00":
+    if not token_valid_upto or str(token_valid_upto) in ["0001-01-01 00:00:00", "0001-01-01"]:
         needs_refresh = True
-        frappe.log_error("t1",token_valid_upto)
     else:
-        frappe.log_error("t0",token_valid_upto)
+        if isinstance(token_valid_upto, str):
+            try:
+                token_valid_upto = datetime.strptime(token_valid_upto, "%Y-%m-%d %H:%M:%S")
+            except Exception:
+                token_valid_upto = datetime.now() - timedelta(hours=5)
+
         if now > token_valid_upto:
             needs_refresh = True
 
@@ -61,10 +65,10 @@ def get_ikas_order_info(order_id):
             new_token = result.get("auth_token")
 
             # Yeni token ve 4 saat sonraki bitiş zamanını kaydet
-            frappe.db.set_value('IKAS Settings', None, 'token', new_token)
-            frappe.db.set_value('IKAS Settings', None, 'token_valid_upto', now + timedelta(hours=4))
-            frappe.db.commit()
-            frappe.clear_cache(doctype="IKAS Settings")
+            settings.token = new_token
+            settings.token_valid_upto = now + timedelta(hours=4)
+            settings.save(ignore_permissions=True)
+
 
             token = new_token
         else:
@@ -256,7 +260,10 @@ def process_ikas_order(order_id,doc):
         'order': {}
     }
     doc = frappe.get_doc(json.loads(doc))
+    ikas_settings = frappe.get_single("IKAS Settings")
 
+     # Gerekli alanlara doc üzerinden erişim
+    customer_name_setting = ikas_settings.customer_name
     # IKAS API'den sipariş bilgisini al
     dctOrderInfo = get_ikas_order_info(order_id)
 
@@ -274,71 +281,69 @@ def process_ikas_order(order_id,doc):
 
 
     # Daha önce aktarılmış mı kontrol et
-    existing_so = frappe.db.exists("Sales Order", {"po_no": order_id})
+    existing_sos = frappe.get_all("Sales Order", filters={"po_no": order_id}, fields=["name"])
+    if existing_sos:
+        frappe.throw(f"Bu sipariş zaten aktarılmış: {existing_sos[0].name}")
 
-    if existing_so:
-        frappe.throw(f"Bu sipariş ({order_id}) daha önce aktarılmış.")
 
+    # 🔹 Müşteri bilgileri
     customer_data = order.get('customer', {})
     first_name = customer_data.get('firstName', '')
     last_name = customer_data.get('lastName', '')
-
-
-    email_id = order.get('customer', {}).get('email', '').strip()
-    default_customer_name = frappe.db.get_single_value('IKAS Settings', 'customer_name')
+    email_id = customer_data.get('email', '').strip()
 
     customer_for_order = None  # Her durumda tanımlı olsun
 
-    # Adres tablosunda email_id kontrolü
-    existing_address_name = frappe.db.get_value("Address", {"email_id": email_id}, "name")
+    address_list = frappe.get_all("Address", filters={"email_id": email_id}, fields=["name"])
+    existing_address_name = address_list[0].name if address_list else None
 
-    if default_customer_name:
+
+
+    customer_for_order = None  # Her durumda tanımlı olsun
+
+
+    if customer_name_setting:
         if existing_address_name:
             # Adres var, Dynamic Link ekle
             docAddress = frappe.get_doc("Address", existing_address_name)
             # Önce aynı link daha önce eklenmiş mi kontrol et
-            existing_link = any(link.link_name == default_customer_name and link.link_doctype == "Customer"
+            existing_link = any(link.link_name == customer_name_setting and link.link_doctype == "Customer"
                                 for link in docAddress.links)
             if not existing_link:
                 docAddress.append("links", {
                     "link_doctype": "Customer",
-                    "link_name": default_customer_name
+                    "link_name": customer_name_setting
                 })
                 docAddress.save(ignore_permissions=True)
-            customer_for_order = default_customer_name
+            customer_for_order = customer_name_setting
         else:
-            # Adres yoksa, sadece adres oluştur
-            create_address(order, default_customer_name, first_name, last_name)
-            customer_for_order = default_customer_name
-    #Setting de customer_name yoksa
+            create_address(order, customer_name_setting, first_name, last_name)
+            customer_for_order = customer_name_setting
     else:
         if existing_address_name:
-            # Email zaten varsa → mevcut müşteriyi al
-            existing_customer = frappe.db.get_value(
-                "Dynamic Link",
-                {"parent": existing_address_name, "link_doctype": "Customer"},
-                "link_name"
+            link_list = frappe.get_all(
+            "Dynamic Link",
+            filters={"parent": existing_address_name, "link_doctype": "Customer"},
+            fields=["link_name"]
             )
+            existing_customer = link_list[0].link_name if link_list else None
+
             if existing_customer:
                 customer_for_order = existing_customer
             else:
-                # Adres var ama bağlı müşteri yoksa yeni müşteri oluştur
                 docCustomer = frappe.new_doc('Customer')
                 docCustomer.customer_name = f"{first_name} {last_name.strip()}"
                 docCustomer.customer_type = "Company"
                 docCustomer.customer_group = "Individual"
                 docCustomer.save()
-
                 create_address(order, docCustomer.name, first_name, last_name)
                 customer_for_order = docCustomer.name
         else:
-            # Email yoksa → tamamen yeni müşteri ve adres oluştur
             docCustomer = frappe.new_doc('Customer')
             docCustomer.customer_name = f"{first_name} {last_name.strip()}"
             docCustomer.customer_type = "Company"
             docCustomer.customer_group = "Individual"
             docCustomer.save()
-
             create_address(order, docCustomer.name, first_name, last_name)
             customer_for_order = docCustomer.name
 
@@ -348,47 +353,34 @@ def process_ikas_order(order_id,doc):
     doc.customer_address = f"{first_name} {last_name.strip()}-Shipping"
     doc.po_no = order_id
 
-
-
-
     ordered_at = order.get('orderedAt', '')
     date = ''
     if ordered_at:
-        # Eğer değer milisaniye cinsindense (örn: 1761204968235)
         try:
             date = datetime.fromtimestamp(ordered_at / 1000).strftime('%Y-%m-%d %H:%M:%S')
         except Exception:
-            date = str(ordered_at)  # Eğer zaten tarih string'iyse, direkt al
-    doc.transaction_date=date
-    doc.delivery_date=date
-    doc.po_date=date
+            date = str(ordered_at)
+    doc.transaction_date = date
+    doc.delivery_date = date
+    doc.po_date = date
 
     # Eski satırları temizle
-    if len(doc.get("items", [])) > 0:
-        doc.items = []
+    doc.items = []
 
     total_qty = 0
     total_amount = 0
 
     for line in order.get('orderLineItems', []):
         variant = line.get('variant', {})
-
-        # variantValues listesi alınıyor
         variant_values = variant.get('variantValues', [])
-        # Listeyi dolaşarak variantValueName'leri birleştiriyoruz
         variant_value_names = ', '.join([v.get('variantValueName', '') for v in variant_values])
         variant_uom = variant_values[0].get('variantTypeName', '') if variant_values else ''
-
-        # itemname = ürün adı + variant değerleri
         itemname = variant.get('name', '')
         if variant_value_names:
             itemname += ' ' + variant_value_names
-
         qty = line.get('quantity', 0)
         rate = line.get('finalPrice', 0)
         amount = qty * rate
-
-        # doc.items'e ekleme
         doc.append('items', {
             'item_code': itemname,
             'item_name': itemname,
@@ -396,45 +388,40 @@ def process_ikas_order(order_id,doc):
             'rate': rate,
             'amount': amount,
             'delivery_date': date,
-            'uom':variant_uom
+            'uom': variant_uom
         })
-
-        # Toplamları biriktir
         total_qty += qty
         total_amount += amount
 
-    shipping_lines = order.get('shippingLines', [])
-    if shipping_lines:
-        for ship in shipping_lines:
-            title = ship.get('title')
-            price = ship.get('price', 0)
-            if title:  # Boş veya None değilse
-                doc.append('items', {
-                    'item_code': 'KARGO',
-                    'item_name': title,
-                    'qty': 1,
-                    'rate': price,
-                    'amount': price,
-                    'delivery_date': date,
-                    'uom':'Adet'
-                })
-                total_qty += 1
-                total_amount += price
+    # Kargo ekle
+    for ship in order.get('shippingLines', []):
+        title = ship.get('title')
+        price = ship.get('price', 0)
+        if title:
+            doc.append('items', {
+                'item_code': 'KARGO',
+                'item_name': title,
+                'qty': 1,
+                'rate': price,
+                'amount': price,
+                'delivery_date': date,
+                'uom': 'Adet'
+            })
+            total_qty += 1
+            total_amount += price
 
-    # Doc genel alanlarına toplamları yaz
+    # Toplamlar
     doc.total_qty = total_qty
     doc.total = total_amount
-    doc.grand_total=total_amount
-    totalFinalPrice=order.get('totalFinalPrice','')
+    doc.grand_total = total_amount
+
+    totalFinalPrice = order.get('totalFinalPrice', '')
     total_amountkontrol = sum(float(item.get('amount') or 0) for item in doc.get('items', []))
 
     if totalFinalPrice != total_amountkontrol:
         frappe.throw("ERP Sipariş tutarı ile IKAS tutarı tutarsız. Kontrol ediniz.")
 
-
     dctResult['doc'] = doc
-
-
     return dctResult
 
 def create_address(order, customer_name, first_name, last_name,):
