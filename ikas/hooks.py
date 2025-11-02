@@ -150,10 +150,18 @@ doctype_js = {
 
 # Scheduled Tasks
 # ---------------
+#scheduler_events = {
+#    "hourly": [
+#        "ikas.ikas_utils.process_new_orders"
+#    ]
+#}
+
 scheduler_events = {
-    "hourly": [
-        "ikas.ikas_utils.check_untransferred_orders"
-    ]
+    "cron": {
+        "* * * * *": [  # her dakika
+            "ikas.ikas_utils.process_new_orders"
+        ]
+    }
 }
 # scheduler_events = {
 # 	"all": [

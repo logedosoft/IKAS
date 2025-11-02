@@ -21,12 +21,11 @@ def process_ikas_auth(store_name, client_id, client_secret):
 			"client_secret": client_secret
 		}
     frappe.log_error("as1",payload)
-    response = requests.post(api_url, data=payload, headers=headers ,timeout=1)
+    response = requests.post(api_url, data=payload, headers=headers ,timeout=3)
     frappe.log_error("as2",response)
     if response.status_code != 200:
         return {"op_result": False, "op_message": f"Token API failed: {response.text}"}
     data = response.json()
-
 	
     return {"op_result": True, "auth_token": data.get("access_token")}
 	
@@ -44,7 +43,7 @@ def get_ikas_order_info(order_id):
 
     now = datetime.now()
     needs_refresh = False
-    
+    frappe.log_error("oo2",order_id)
     # Token süresi kontrolü
     if not token_valid_upto or str(token_valid_upto) in ["0001-01-01 00:00:00", "0001-01-01"]:
         needs_refresh = True
@@ -230,7 +229,7 @@ def get_ikas_order_info(order_id):
     }}
     """
     response = requests.post(api_url, json={"query": query}, headers=headers,timeout=3)
-
+    frappe.log_error("vv1",response)
 
     if response.status_code != 200:
         dctResult = {
@@ -242,7 +241,7 @@ def get_ikas_order_info(order_id):
             'op_result': True,
             'order_info': response.json()
         }
-
+    frappe.log_error("vv1",dctResult)
     #print(dctResult)
     return dctResult
 
@@ -260,7 +259,11 @@ def process_ikas_order(order_id, doc):
     }
 
     try:
-        doc = frappe.get_doc(json.loads(doc))
+        # doc zaten dict ise json.loads yapma
+        if isinstance(doc, dict):
+            doc= frappe.get_doc(doc)
+        else:
+            doc= frappe.get_doc(json.loads(doc))
         ikas_settings = frappe.get_single("IKAS Settings")
 
         customer_name_setting = ikas_settings.customer_name
@@ -440,28 +443,40 @@ def process_ikas_order(order_id, doc):
 
         dctResult['op_result'] = True
         dctResult['doc'] = doc
-        # 🔹 IKAS Settings'te son işlenen siparişi kaydet
         try:
-            ikas_settings2 = frappe.get_single("IKAS Settings")
+            if doc:
+                doc.save(ignore_permissions=True)
+                dctResult['op_message'] = "Sipariş Başarıyla Kaydedildi."
+            # 🔹 IKAS Settings'te son işlenen siparişi kaydet
+            try:
+                ikas_settings2 = frappe.get_single("IKAS Settings")
+                if getattr(ikas_settings2, "order_auto_confirm", 1):
+                # None veya string sorunlarını önlemek için int'e çeviriyoruz
+                    order_id_int = int(order_id)
+                    ikas_settings2.last_order_no = order_id_int
+                    ikas_settings2.save(ignore_permissions=True)
 
-            # None veya string sorunlarını önlemek için int'e çeviriyoruz
-            last_order_no = int(ikas_settings2.last_order_no or 0)
-            order_id_int = int(order_id)
+            except Exception:
+                frappe.log_error(frappe.get_traceback(), f"IKAS Settings last_order_no güncelleme hatası ({order_id})")
+        except Exception as e:
+            import traceback
+            frappe.log_error(f"{str(e)}\n{traceback.format_exc()}", f"Sales Order kaydetme hatası - Order: {order_id}")
 
-            if last_order_no < order_id_int:
-                ikas_settings2.last_order_no = order_id_int
-                ikas_settings2.save(ignore_permissions=True)
-
-        except Exception:
-            # log_error artık string traceback alıyor, e direkt verilmedi
-            frappe.log_error(frappe.get_traceback(), f"IKAS Settings last_order_no güncelleme hatası ({order_id})")
 
         return dctResult
 
     except Exception as e:
         frappe.log_error(e, "Genel process_ikas_order hatası")
         dctResult['op_message'] = "Sipariş işleme sırasında bir hata oluştu, destek ile iletişime geçin."
-        return dctResult
+    finally:
+        # Tüm durumları logla
+        log_title = f"GENEL LOG - Order: {order_id}"
+        log_message = dctResult['op_message']
+        if 'traceback' in dctResult:
+            log_message += "\n" + dctResult['traceback']
+        frappe.log_error(log_title,log_message)
+
+    return dctResult
 
 
 def create_address(order, customer_name, first_name, last_name,):
@@ -538,15 +553,19 @@ def get_ikas_auth_token_py():
 
 def check_untransferred_orders():
     import requests
-    # IKAS Settings belgesini al
+
+    """
+    IKAS API'den son işlenen orderNumber'dan büyük siparişleri çeker.
+    Hataları frappe Error Log'a kaydeder.
+    """
     settings = frappe.get_single("IKAS Settings")
     token = settings.token
-    last_order_no = int(settings.last_order_no or 0)  # son kontrol edilen sipariş
+    last_order_no = int(settings.last_order_no or 0)
 
     api_url = "https://api.myikas.com/api/v1/admin/graphql"
     headers = {
         'Content-Type': 'application/json',
-        'Authorization': "Bearer " + token
+        'Authorization': f"Bearer {token}"
     }
 
     page = 1
@@ -555,7 +574,6 @@ def check_untransferred_orders():
     new_orders = []
 
     while has_next:
-        # GraphQL sorgusu, sayfa ve limit parametreleri ile
         query = f"""
         query {{
             listOrder(pagination: {{ page: {page}, limit: {limit} }}) {{
@@ -570,29 +588,103 @@ def check_untransferred_orders():
             }}
         }}
         """
-
         try:
-            response = requests.post(api_url, json={"query": query}, headers=headers, timeout=5)
+            response = requests.post(api_url, json={"query": query}, headers=headers, timeout=10)
             response.raise_for_status()
-            result = response.json()
-            
-            # Hata kontrolü
-            if "errors" in result:
-                frappe.log_error(str(result["errors"]), "IKAS API listOrder Hatası")
-                break
-
-            orders = result["data"]["listOrder"]["data"]
-            has_next = result["data"]["listOrder"]["hasNext"]
-
-            # last_order_no'dan büyük olanları filtrele
-            for order in orders:
-                if int(order["orderNumber"]) > last_order_no:
-                    new_orders.append(order)
-
-            page += 1  # bir sonraki sayfaya geç
-
-        except Exception as e:
+        except requests.exceptions.RequestException as e:
             frappe.log_error(str(e), "IKAS API request hatası")
             break
 
+        try:
+            result = response.json()
+        except ValueError as ve:
+            frappe.log_error(str(ve), "IKAS API JSON decode hatası")
+            break
+
+        if not isinstance(result, dict):
+            frappe.log_error(f"Beklenmeyen response tipi: {type(result)} - {result}", "IKAS API Hatası")
+            break
+
+        if "errors" in result:
+            frappe.log_error(str(result["errors"]), "IKAS API listOrder Hatası")
+            break
+
+        try:
+            orders = result["data"]["listOrder"]["data"]
+            has_next = result["data"]["listOrder"]["hasNext"]
+        except KeyError as ke:
+            frappe.log_error(str(ke) + f" - Response: {result}", "IKAS API veri hatası")
+            break
+
+        for order in orders:
+            try:
+                if int(order["orderNumber"]) > last_order_no:
+                    new_orders.append(order)
+            except (KeyError, ValueError) as e:
+                frappe.log_error("siparis bilgiler", "deneme")
+                frappe.log_error(f"check_untransferred_orders {e} - Order: {order}", "IKAS order işleme hatası deneme1")
+
+
+        page += 1
+    
     return new_orders
+
+def process_new_orders():
+    try:
+        settings = frappe.get_single("IKAS Settings")
+        if getattr(settings, "order_auto_confirm", 0):
+            try:
+                 #new_orders = check_untransferred_orders()
+                new_orders = [
+                    {
+                        "orderNumber": "2257",
+                        "orderedAt": 1760945411189
+                    },
+                ]
+
+
+                frappe.log_error(
+                message=json.dumps(new_orders, ensure_ascii=False),
+                title="IKAS Yeni Siparişler"
+                )
+                if not new_orders:
+                    frappe.log_error("Yeni sipariş bulunamadı.", "IKAS Order İşleme")
+                    return
+
+            except Exception as e:
+                frappe.log_error(frappe.get_traceback(), "check_untransferred_orders hatası")
+                return
+
+            # -------------------------------
+            # 2️⃣ Her siparişi işle
+            # -------------------------------
+            for order in new_orders:
+                try:
+                    order_id = order["orderNumber"]
+
+                    # Manual test için sahte Sales Order doc oluştur
+                    doc = frappe.new_doc("Sales Order")
+                    doc.customer = "Test Customer"
+                    doc.po_no = order["orderNumber"]
+                    doc.transaction_date = datetime.fromtimestamp(order["orderedAt"] / 1000).strftime('%Y-%m-%d %H:%M:%S')
+                    doc.delivery_date = doc.transaction_date
+
+                    # doc'u JSON olarak serialize et
+                    doc_json = frappe.as_json(doc)
+
+                    # Siparişi işleyen fonksiyon
+                    result = process_ikas_order(order_id, doc_json)
+
+                    if result.get("op_result"):
+                        settings = frappe.get_single("IKAS Settings")
+                        settings.last_order_no = int(order["orderNumber"])
+                        settings.save(ignore_permissions=True)
+
+                except Exception as e:
+                    frappe.log_error(frappe.get_traceback(), f"process_new_orders hata - Order: {order.get('orderNumber')}")
+
+            frappe.log_error("Aktarım döngüsü tamamlandı.", "IKAS Order İşleme")
+        else:
+                frappe.log_error("order_auto_confirm işaretli değil, scheduler atlandı.", "IKAS Scheduler")
+    except Exception as e:
+        frappe.log_error(f"scheduled_process_new_orders hatası: {str(e)}", "IKAS Scheduler")
