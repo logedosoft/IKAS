@@ -417,6 +417,19 @@ def process_ikas_order(order_id, doc):
             totalFinalPrice = order.get('totalFinalPrice', 0)
             total_amountkontrol = sum(float(item.get('amount') or 0) for item in doc.get('items', []))
             if float(totalFinalPrice) != total_amountkontrol:
+                ikas_order_number = order.get('orderNumber', 'Bilinmiyor')
+                send_email = ikas_settings.notification_mail
+                frappe.log_error ("mail hatası" , send_email +"İtem veya toplam hesaplama hatası")
+                # E-posta gönder
+                frappe.sendmail(
+                    recipients=[send_email],  # Buraya bildirim gidecek e-posta
+                    subject=f"IKAS-ERP Tutar Uyumsuzluğu: Sipariş {ikas_order_number}",
+                    message=f"""
+                    IKAS Sipariş Numarası: {ikas_order_number} <br>
+                    IKAS Toplam Tutar: {totalFinalPrice} <br>
+                    ERP Toplam Tutar: {total_amountkontrol} <br>
+                    Lütfen kontrol ediniz.
+                    """)
                 dctResult['op_message'] = "ERP ve IKAS sipariş tutarı tutarsız, kontrol ediniz."
                 return dctResult
 
@@ -427,6 +440,15 @@ def process_ikas_order(order_id, doc):
 
         dctResult['op_result'] = True
         dctResult['doc'] = doc
+        # 🔹 IKAS Settings'te son işlenen siparişi kaydet
+        try:
+            ikas_settings2 = frappe.get_single("IKAS Settings")
+            if ikas_settings2.last_order_no < order_id:
+                ikas_settings2.last_order_no = order_id
+                ikas_settings2.save(ignore_permissions=True)
+        except Exception as e:
+            frappe.log_error(e, f"IKAS Settings last_order_no güncelleme hatası ({order_id})")
+
         return dctResult
 
     except Exception as e:
@@ -505,3 +527,65 @@ def get_ikas_auth_token_py():
         frappe.log_error(title="IKAS Token Error", message=str(e))
         dctResult["op_message"] = f"Token alınırken hata oluştu: {str(e)}"
         return dctResult
+
+
+def check_untransferred_orders():
+    import requests
+    # IKAS Settings belgesini al
+    settings = frappe.get_single("IKAS Settings")
+    token = settings.token
+    last_order_no = int(settings.last_order_no or 0)  # son kontrol edilen sipariş
+
+    api_url = "https://api.myikas.com/api/v1/admin/graphql"
+    headers = {
+        'Content-Type': 'application/json',
+        'Authorization': "Bearer " + token
+    }
+
+    page = 1
+    limit = 50
+    has_next = True
+    new_orders = []
+
+    while has_next:
+        # GraphQL sorgusu, sayfa ve limit parametreleri ile
+        query = f"""
+        query {{
+            listOrder(pagination: {{ page: {page}, limit: {limit} }}) {{
+                data {{
+                    orderNumber
+                    id
+                    orderedAt
+                }}
+                page
+                limit
+                hasNext
+            }}
+        }}
+        """
+
+        try:
+            response = requests.post(api_url, json={"query": query}, headers=headers, timeout=5)
+            response.raise_for_status()
+            result = response.json()
+            
+            # Hata kontrolü
+            if "errors" in result:
+                frappe.log_error(str(result["errors"]), "IKAS API listOrder Hatası")
+                break
+
+            orders = result["data"]["listOrder"]["data"]
+            has_next = result["data"]["listOrder"]["hasNext"]
+
+            # last_order_no'dan büyük olanları filtrele
+            for order in orders:
+                if int(order["orderNumber"]) > last_order_no:
+                    new_orders.append(order)
+
+            page += 1  # bir sonraki sayfaya geç
+
+        except Exception as e:
+            frappe.log_error(str(e), "IKAS API request hatası")
+            break
+
+    return new_orders
