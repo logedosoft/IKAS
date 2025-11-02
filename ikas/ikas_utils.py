@@ -443,11 +443,18 @@ def process_ikas_order(order_id, doc):
         # 🔹 IKAS Settings'te son işlenen siparişi kaydet
         try:
             ikas_settings2 = frappe.get_single("IKAS Settings")
-            if ikas_settings2.last_order_no < order_id:
-                ikas_settings2.last_order_no = order_id
+
+            # None veya string sorunlarını önlemek için int'e çeviriyoruz
+            last_order_no = int(ikas_settings2.last_order_no or 0)
+            order_id_int = int(order_id)
+
+            if last_order_no < order_id_int:
+                ikas_settings2.last_order_no = order_id_int
                 ikas_settings2.save(ignore_permissions=True)
-        except Exception as e:
-            frappe.log_error(e, f"IKAS Settings last_order_no güncelleme hatası ({order_id})")
+
+        except Exception:
+            # log_error artık string traceback alıyor, e direkt verilmedi
+            frappe.log_error(frappe.get_traceback(), f"IKAS Settings last_order_no güncelleme hatası ({order_id})")
 
         return dctResult
 
