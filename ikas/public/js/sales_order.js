@@ -12,7 +12,8 @@ function get_ikas_order(frm) {
             method: 'ikas.ikas_utils.process_ikas_order',
             args: {
                 order_id: values.order_id,
-				doc: JSON.stringify(frm.doc)
+				doc: JSON.stringify(frm.doc),
+                save_doc: false  // Manuel test → DB'ye kaydetme
             },
             callback: (r) => {
                 if (!r.message.op_result) {
@@ -20,8 +21,8 @@ function get_ikas_order(frm) {
                 } else {
 					frappe.model.sync(r.message.doc);
 					frm.dirty();
-					frm.refresh_fields(["items", "roll_count", "total_weight"]); 
-                    frappe.msgprint(__('Sales Order bilgileri IKAS verisi ile dolduruldu.'));
+                    frm.refresh(); // tüm alanları ve child table'ları yeniler
+                    frappe.msgprint(__('Sales Order bilgileri IKAS verisi ile dolduruldu (kaydedilmedi).'));
                 }
             }
         })

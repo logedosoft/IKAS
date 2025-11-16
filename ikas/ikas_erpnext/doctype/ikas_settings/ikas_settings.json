@@ -14,6 +14,8 @@
   "token",
   "settings_section",
   "customer_name",
+  "custom_ld_sales_person",
+  "tax_category",
   "order_auto_confirm",
   "notification_mail",
   "last_order_no"
@@ -89,13 +91,25 @@
    "fieldtype": "Data",
    "label": "Last Order No",
    "read_only": 1
+  },
+  {
+   "fieldname": "custom_ld_sales_person",
+   "fieldtype": "Link",
+   "label": "Sales Person",
+   "options": "Sales Person"
+  },
+  {
+   "fieldname": "tax_category",
+   "fieldtype": "Link",
+   "label": "Tax Category",
+   "options": "Tax Category"
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "issingle": 1,
  "links": [],
- "modified": "2025-10-28 15:31:50.050874",
+ "modified": "2025-11-16 21:12:50.138787",
  "modified_by": "Administrator",
  "module": "Ikas ERPNext",
  "name": "IKAS Settings",
