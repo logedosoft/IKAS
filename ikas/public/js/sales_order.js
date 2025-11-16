@@ -12,8 +12,8 @@ function get_ikas_order(frm) {
             method: 'ikas.ikas_utils.process_ikas_order',
             args: {
                 order_id: values.order_id,
-				doc: JSON.stringify(frm.doc),
-                save_doc: false  // Manuel test → DB'ye kaydetme
+    doc: JSON.stringify(frm.doc),
+                save_doc: 'false'  // String olarak gönder, Python tarafında boolean'a çevrilecek
             },
             callback: (r) => {
                 if (!r.message.op_result) {

@@ -247,7 +247,7 @@ def get_ikas_order_info(order_id):
 
 
 @frappe.whitelist()
-def process_ikas_order(order_id, doc,save_doc=True):
+def process_ikas_order(order_id, doc, save_doc=True):
     """
     IKAS siparişini işler. Hata olursa detay Frappe loguna yazılır,
     kullanıcıya basit bir mesaj döner.
@@ -259,6 +259,10 @@ def process_ikas_order(order_id, doc,save_doc=True):
     }
 
     try:
+        # save_doc parametresini boolean'a çevir
+        if isinstance(save_doc, str):
+            save_doc = save_doc.lower() in ['true', '1', 'yes']
+        
         # doc zaten dict ise json.loads yapma
         if isinstance(doc, dict):
             doc= frappe.get_doc(doc)
@@ -469,23 +473,23 @@ def process_ikas_order(order_id, doc,save_doc=True):
             totalFinalPrice = order.get('totalFinalPrice', 0)
             total_amountkontrol = sum(float(item.get('amount') or 0) for item in doc.get('items', []))
            
-            # if float(totalFinalPrice) != total_amountkontrol:
-               # ikas_order_number = order.get('orderNumber', 'Bilinmiyor')
-               # send_email = ikas_settings.notification_mail
-               # frappe.log_error ("mail hatası" , send_email +"İtem veya toplam hesaplama hatası")
-               # # E-posta gönder
-               # frappe.sendmail(
-               #     recipients=[send_email],  # Buraya bildirim gidecek e-posta
-               #     subject=f"IKAS-ERP Tutar Uyumsuzluğu: Sipariş {ikas_order_number}",
+            if float(totalFinalPrice) != total_amountkontrol:
+                ikas_order_number = order.get('orderNumber', 'Bilinmiyor')
+                send_email = ikas_settings.notification_mail
+                frappe.log_error ("mail hatası" , send_email +"İtem veya toplam hesaplama hatası")
+                # E-posta gönder
+                frappe.sendmail(
+                   recipients=[send_email],  # Buraya bildirim gidecek e-posta
+                   subject=f"IKAS-ERP Tutar Uyumsuzluğu: Sipariş {ikas_order_number}",
                   
-                   # message=f"""
-                   # IKAS Sipariş Numarası: {ikas_order_number} <br>
-                  #  IKAS Toplam Tutar: {totalFinalPrice} <br>
-                   # ERP Toplam Tutar: {total_amountkontrol} <br>
+                    message=f"""
+                    IKAS Sipariş Numarası: {ikas_order_number} <br>
+                    IKAS Toplam Tutar: {totalFinalPrice} <br>
+                    ERP Toplam Tutar: {total_amountkontrol} <br>
                     #Lütfen kontrol ediniz.
-                 #   """)
-               # dctResult['op_message'] = "ERP ve IKAS sipariş tutarı tutarsız, kontrol ediniz."
-                #return dctResult
+                   """)
+                dctResult['op_message'] = "ERP ve IKAS sipariş tutarı tutarsız, kontrol ediniz."
+                return dctResult
             
         except Exception as e:
             frappe.log_error(e, "İtem veya toplam hesaplama hatası")
@@ -497,11 +501,11 @@ def process_ikas_order(order_id, doc,save_doc=True):
 
         try:
             if doc:
-                if doc and save_doc:  # sadece save_doc=True ise kaydet
+                if save_doc:  # sadece save_doc=True ise kaydet
                     doc.save(ignore_permissions=True)
                     dctResult['op_message'] = "Sipariş Başarıyla Kaydedildi."
                 else:
-                    dctResult['op_message'] = "Sipariş doc oluşturuldu (kaydedilmedi)."
+                    dctResult['op_message'] = "Sipariş bilgileri dolduruldu (veritabanına kaydedilmedi)."
             try:
                 ikas_settings2 = frappe.get_single("IKAS Settings")
                 if getattr(ikas_settings2, "order_auto_confirm", 1):
