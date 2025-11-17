@@ -2,11 +2,9 @@
 # LOGEDOSOFT
 
 import frappe, json
-from frappe import msgprint, _
-from frappe.model.document import Document
-from frappe.utils import cint, flt
 from frappe.utils import now_datetime
 from datetime import datetime
+import math
 
 
 def process_ikas_auth(store_name, client_id, client_secret):
@@ -229,7 +227,7 @@ def get_ikas_order_info(order_id):
     }}
     """
     response = requests.post(api_url, json={"query": query}, headers=headers,timeout=3)
-    
+
 
     if response.status_code != 200:
         dctResult = {
@@ -241,7 +239,7 @@ def get_ikas_order_info(order_id):
             'op_result': True,
             'order_info': response.json()
         }
-    
+
     #print(dctResult)
     return dctResult
 
@@ -262,7 +260,7 @@ def process_ikas_order(order_id, doc, save_doc=True):
         # save_doc parametresini boolean'a çevir
         if isinstance(save_doc, str):
             save_doc = save_doc.lower() in ['true', '1', 'yes']
-        
+
         # doc zaten dict ise json.loads yapma
         if isinstance(doc, dict):
             doc= frappe.get_doc(doc)
@@ -360,6 +358,8 @@ def process_ikas_order(order_id, doc, save_doc=True):
             doc.custom_ld_sales_person = ikas_settings.custom_ld_sales_person
             #vergi alanı için
             doc.tax_category = ikas_settings.tax_category
+            #payment_terms_template kayaoğluna zorunlu
+            doc.payment_terms_template = ikas_settings.payment_terms_template
 
             ordered_at = order.get('orderedAt', '')
             date = ''
@@ -385,6 +385,12 @@ def process_ikas_order(order_id, doc, save_doc=True):
 
             for line in order.get('orderLineItems', []):
                 variant = line.get('variant', {})
+                variant_values = variant.get('variantValues', [])
+                variant_value_names = ', '.join([v.get('variantValueName', '') for v in variant_values])
+                description= variant.get('name', '')
+                if variant_value_names:
+                    description += ' ' + variant_value_names
+
                 itemnamesrc = variant.get('sku', '')   # SKU kaynağı
 
                 # Eğer SKU boşsa direkt hata verelim
@@ -407,8 +413,6 @@ def process_ikas_order(order_id, doc, save_doc=True):
                     frappe.log_error(msg, "IKAS-SKU Eşleşme Hatası")
                     dctResult['op_message'] = msg
                     return dctResult
-             
-
 
                 # SKU bulunduysa ERPNext bilgilerini kullanarak satır oluştur
                 quantity = line.get('quantity', 0)  # örn. 2
@@ -423,17 +427,19 @@ def process_ikas_order(order_id, doc, save_doc=True):
                     unit_qty = 0.0
 
                 # 1 kg fiyatı
-                rate_per_kg = line.get('finalPrice', 0) / unit_qty if unit_qty > 0 else 0
+                kdvharifiyati=line.get('finalPrice', 0) / (1 + line.get('taxValue', 0)/100)
+                rate_per_kg = kdvharifiyati / unit_qty if unit_qty > 0 else 0
 
                 # Toplam miktar
                 qty = unit_qty * quantity
 
                 # Toplam tutar
                 amount = rate_per_kg * qty
-
+                
                 doc.append('items', {
                     'item_code': erp_item.item_code,
                     'item_name': erp_item.item_name,
+                    'description':description,
                     'qty': qty,            # kg cinsinden toplam
                     'rate': rate_per_kg,   # 1 kg fiyatı
                     'amount': amount,
@@ -441,61 +447,109 @@ def process_ikas_order(order_id, doc, save_doc=True):
                     'uom': 'kg'
                 })
 
-                total_qty += qty
-                total_amount += amount
 
 
+              
 
-
-            # Kargo ekle
-            """
             for ship in order.get('shippingLines', []):
-                title = ship.get('title')
-                price = ship.get('price', 0)
-                if title:
-                    doc.append('items', {
-                        'item_code': 'KARGO',
-                        'item_name': title,
-                        'qty': 1,
-                        'rate': price,
-                        'amount': price,
-                        'delivery_date': date,
-                        'uom': 'Adet'
-                    })
-                    total_qty += 1
-                    total_amount += price
-            """
-            doc.total_qty = total_qty
-            doc.total = total_amount
-            doc.grand_total = total_amount
+                erp_ship = frappe.db.get_value(
+                    "Item",
+                    {"item_code": ikas_settings.cargo_company},
+                    ["item_code", "item_name", "stock_uom"],
+                    as_dict=True
+                )
 
-            totalFinalPrice = order.get('totalFinalPrice', 0)
-            total_amountkontrol = sum(float(item.get('amount') or 0) for item in doc.get('items', []))
-           
-            if float(totalFinalPrice) != total_amountkontrol:
+                if not erp_ship:
+                    frappe.log_error("Kargo Item bulunamadı!", f"Item Code: {ikas_settings.cargo_company}")
+                    continue
+
+                
+                kdvharickargofiyati=ship.get('price', 0) / (1 + ship.get('taxValue', 0)/100)
+                doc.append('items', {
+                    'item_code': erp_ship.item_code,
+                    'item_name': erp_ship.item_name,
+                    'qty': 1,
+                    'rate': kdvharickargofiyati,
+                    'amount': kdvharickargofiyati,
+                    'delivery_date': date,
+                    'uom': erp_ship.stock_uom
+                })
+
+
+
+
+            tax_lines = order.get('taxLines', [])
+
+            doc.set("taxes", [])
+
+            for tax in tax_lines:
+                rate = float(tax.get("rate", 0))
+                price = float(tax.get("price", 0))
+
+                if rate == 1:
+                    account = "KDV 1 - 191001"
+                    desc = "KDV %1"
+                elif rate == 20:
+                    account = "KDV 20 - 191020"
+                    desc = "KDV %20"
+                else:
+                    account = "KDV - 191000"
+                    desc = f"KDV %{rate}"
+
+                # Net tutar yerine 'Actual' tipi kullan
+                doc.append("taxes", {
+                    "charge_type": "Actual",
+                    "account_head": account,
+                    "rate": rate,
+                    "tax_amount": price,  # IKAS’tan gelen vergi tutarı
+                    "description": desc
+                })
+
+            # Vergileri yeniden hesapla
+            doc.calculate_taxes_and_totals()
+            
+            totalFinalPrice = float(order.get('totalFinalPrice', 0) or 0)
+            totalFinalPrice_rounded = math.ceil(totalFinalPrice)
+            erp_grand_total_raw = float(doc.get("grand_total") or 0)
+            erp_grand_total = math.ceil(erp_grand_total_raw)
+            total_amountkontrol = erp_grand_total
+            
+            
+
+            # Karşılaştırma (ceil uygulanmış değerler üzerinden)
+            if totalFinalPrice_rounded != total_amountkontrol:
                 ikas_order_number = order.get('orderNumber', 'Bilinmiyor')
                 send_email = ikas_settings.notification_mail
-                frappe.log_error ("mail hatası" , send_email +"İtem veya toplam hesaplama hatası")
+
+                # Log kaydı
+                frappe.log_error(
+                    f"IKAS-ERP tutar uyumsuzluğu! Sipariş: {ikas_order_number}",
+                    f"IKAS: {totalFinalPrice_rounded}, ERP: {total_amountkontrol}"
+                )
+
                 # E-posta gönder
                 frappe.sendmail(
-                   recipients=[send_email],  # Buraya bildirim gidecek e-posta
-                   subject=f"IKAS-ERP Tutar Uyumsuzluğu: Sipariş {ikas_order_number}",
-                  
+                    recipients=[send_email],
+                    subject=f"IKAS-ERP Tutar Uyumsuzluğu: Sipariş {ikas_order_number}",
                     message=f"""
-                    IKAS Sipariş Numarası: {ikas_order_number} <br>
-                    IKAS Toplam Tutar: {totalFinalPrice} <br>
-                    ERP Toplam Tutar: {total_amountkontrol} <br>
-                    #Lütfen kontrol ediniz.
-                   """)
-                dctResult['op_message'] = "ERP ve IKAS sipariş tutarı tutarsız, kontrol ediniz."
-                return dctResult
-            
+                        IKAS Sipariş Numarası: {ikas_order_number} <br>
+                        IKAS Toplam Tutar (Yuvarlanmış): {totalFinalPrice_rounded} <br>
+                        ERP Toplam Tutar (Yuvarlanmış): {total_amountkontrol} <br>
+                        <br>
+                        Lütfen siparişi kontrol ediniz.
+                    """
+                )
+
+               # dctResult['op_message'] = "ERP ve IKAS sipariş tutarı tutarsız, kontrol ediniz."
+              #  return dctResult
+
         except Exception as e:
             frappe.log_error(e, "İtem veya toplam hesaplama hatası")
             dctResult['op_message'] = "Sipariş kalemleri işlenemedi, destek ile iletişime geçin."
             return dctResult
 
         dctResult['op_result'] = True
+        
         dctResult['doc'] = doc.as_dict()
 
         try:

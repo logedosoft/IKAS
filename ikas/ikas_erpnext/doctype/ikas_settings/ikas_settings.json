@@ -14,8 +14,10 @@
   "token",
   "settings_section",
   "customer_name",
+  "cargo_company",
   "custom_ld_sales_person",
   "tax_category",
+  "payment_terms_template",
   "order_auto_confirm",
   "notification_mail",
   "last_order_no"
@@ -103,13 +105,25 @@
    "fieldtype": "Link",
    "label": "Tax Category",
    "options": "Tax Category"
+  },
+  {
+   "fieldname": "payment_terms_template",
+   "fieldtype": "Link",
+   "label": "Payment Terms Template",
+   "options": "Payment Terms Template"
+  },
+  {
+   "fieldname": "cargo_company",
+   "fieldtype": "Link",
+   "label": "Cargo Company(items)",
+   "options": "Item"
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "issingle": 1,
  "links": [],
- "modified": "2025-11-16 21:12:50.138787",
+ "modified": "2025-11-17 23:25:58.328210",
  "modified_by": "Administrator",
  "module": "Ikas ERPNext",
  "name": "IKAS Settings",
