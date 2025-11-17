@@ -158,11 +158,12 @@ doctype_js = {
 
 scheduler_events = {
     "cron": {
-        "* * * * *": [  # her dakika
+        "*/5 * * * *": [
             "ikas.ikas_utils.process_new_orders"
         ]
     }
 }
+
 # scheduler_events = {
 # 	"all": [
 # 		"ikas.tasks.all"
