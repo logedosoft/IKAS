@@ -480,33 +480,38 @@ def process_ikas_order(order_id, doc, save_doc=True):
 
             tax_lines = order.get('taxLines', [])
 
+            # Mevcut vergileri temizle
             doc.set("taxes", [])
 
             for tax in tax_lines:
                 rate = float(tax.get("rate", 0))
                 price = float(tax.get("price", 0))
 
-                if rate == 1:
-                    account = "KDV 1 - 191001"
-                    desc = "KDV %1"
-                elif rate == 20:
-                    account = "KDV 20 - 191020"
-                    desc = "KDV %20"
-                else:
-                    account = "KDV - 191000"
-                    desc = f"KDV %{rate}"
+                # IKAS Tax Doctype içinden rate'e göre account çek
+                tax_row = frappe.db.get_value(
+                    "IKAS Tax",
+                    {"rate": rate},
+                    ["account_name"],
+                    as_dict=True
+                )
 
-                # Net tutar yerine 'Actual' tipi kullan
+                if tax_row and tax_row.get("account_name"):
+                    account = tax_row.account_name
+                else:
+                    # Eşleşme yoksa default hesap
+                    account = "KDV - 191000"
+
+                # Actual tipi ile vergi satırı ekle
                 doc.append("taxes", {
                     "charge_type": "Actual",
                     "account_head": account,
                     "rate": rate,
-                    "tax_amount": price,  # IKAS’tan gelen vergi tutarı
-                    "description": desc
+                    "tax_amount": price,
                 })
 
             # Vergileri yeniden hesapla
             doc.calculate_taxes_and_totals()
+
             
             totalFinalPrice = float(order.get('totalFinalPrice', 0) or 0)
             totalFinalPrice_rounded = math.ceil(totalFinalPrice)
@@ -664,7 +669,7 @@ def get_ikas_auth_token_py():
 
 def check_untransferred_orders():
     import requests
-   
+    frappe.log_error("check_untransferred_orders", "IKAS Order İşleme")
     """
     IKAS API'den son işlenen orderNumber'dan büyük siparişleri çeker.
     Hataları frappe Error Log'a kaydeder.
@@ -743,6 +748,7 @@ def check_untransferred_orders():
 
 def process_new_orders():
     try:
+        frappe.log_error("process_new_orders", "IKAS Order İşleme")
         settings = frappe.get_single("IKAS Settings")
         if getattr(settings, "order_auto_confirm", 0):
             try:
@@ -796,7 +802,7 @@ def process_new_orders():
                     frappe.log_error(frappe.get_traceback(), f"process_new_orders hata - Order: {order.get('orderNumber')}")
 
             frappe.log_error("Aktarım döngüsü tamamlandı.", "IKAS Order İşleme")
-        else:
-                frappe.log_error("order_auto_confirm işaretli değil, scheduler atlandı.", "IKAS Scheduler")
+       # else:
+               # frappe.log_error("order_auto_confirm işaretli değil, scheduler atlandı.", "IKAS Scheduler")
     except Exception as e:
         frappe.log_error(f"scheduled_process_new_orders hatası: {str(e)}", "IKAS Scheduler")
