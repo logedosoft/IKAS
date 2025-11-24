@@ -18,8 +18,9 @@
   "custom_ld_sales_person",
   "payment_terms_template",
   "order_auto_confirm",
+  "automatic_transfer_start_date",
+  "ikas_tag_id",
   "notification_mail",
-  "last_order_no",
   "tax_section",
   "tax_category",
   "taxes"
@@ -91,12 +92,6 @@
    "options": "Email"
   },
   {
-   "fieldname": "last_order_no",
-   "fieldtype": "Data",
-   "label": "Last Order No",
-   "read_only": 1
-  },
-  {
    "fieldname": "custom_ld_sales_person",
    "fieldtype": "Link",
    "label": "Sales Person",
@@ -130,13 +125,25 @@
    "fieldtype": "Table",
    "label": "Taxes",
    "options": "IKAS Tax"
+  },
+  {
+   "fetch_if_empty": 1,
+   "fieldname": "automatic_transfer_start_date",
+   "fieldtype": "Date",
+   "label": "Automatic Transfer Start Date"
+  },
+  {
+   "fetch_if_empty": 1,
+   "fieldname": "ikas_tag_id",
+   "fieldtype": "Data",
+   "label": "Ikas Tag Id"
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "issingle": 1,
  "links": [],
- "modified": "2025-11-18 20:32:18.913746",
+ "modified": "2025-11-25 02:12:48.712386",
  "modified_by": "Administrator",
  "module": "Ikas ERPNext",
  "name": "IKAS Settings",
