@@ -507,6 +507,7 @@ def process_ikas_order(order_id, doc, save_doc=True):
                     "account_head": account,
                     "rate": rate,
                     "tax_amount": price,
+                    "description":account
                 })
 
             # Vergileri yeniden hesapla
@@ -560,7 +561,7 @@ def process_ikas_order(order_id, doc, save_doc=True):
         try:
             if doc:
                 if save_doc:  # sadece save_doc=True ise kaydet
-                    frappe.log_error("SO Debug",f"Sales Order Kaydediliyor: {doc.as_dict()}") # Tüm belgeyi logla
+                    frappe.log_error("SO info",frappe.as_json(doc)) # Tüm belgeyi logla
                     doc.save(ignore_permissions=True)
                     dctResult['op_message'] = "Sipariş Başarıyla Kaydedildi."
                 else:
