@@ -17,10 +17,11 @@
   "custom_ld_sales_person",
   "payment_terms_template",
   "order_auto_confirm",
-  "automatic_transfer_start_date",
   "ikas_tag_id",
   "notification_mail",
   "column_break_aaui",
+  "last_order_no",
+  "automatic_transfer_start_date",
   "tax_section",
   "tax_category",
   "taxes",
@@ -136,20 +137,24 @@
    "label": "Automatic Transfer Start Date"
   },
   {
-   "fetch_if_empty": 1,
    "fieldname": "ikas_tag_id",
    "fieldtype": "Data",
    "label": "Ikas Tag Id"
   },
   {
-   "fieldname": "general_tab",
-   "fieldtype": "Tab Break",
-   "label": "General"
-  },
-  {
    "fieldname": "token_tab",
    "fieldtype": "Tab Break",
    "label": "Token"
+  },
+  {
+   "fieldname": "last_order_no",
+   "fieldtype": "Data",
+   "label": "Last Order No"
+  },
+  {
+   "fieldname": "general_tab",
+   "fieldtype": "Tab Break",
+   "label": "General"
   },
   {
    "fieldname": "column_break_aaui",
@@ -160,7 +165,7 @@
  "index_web_pages_for_search": 1,
  "issingle": 1,
  "links": [],
- "modified": "2026-06-14 20:29:15.493555",
+ "modified": "2026-06-15 00:00:26.341267",
  "modified_by": "Administrator",
  "module": "Ikas ERPNext",
  "name": "IKAS Settings",
