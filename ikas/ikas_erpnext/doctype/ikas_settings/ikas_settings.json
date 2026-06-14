@@ -5,13 +5,12 @@
  "doctype": "DocType",
  "engine": "InnoDB",
  "field_order": [
+  "general_tab",
   "integration_information_section",
   "store_name",
   "client_id",
   "client_secret",
   "connection_check",
-  "token_valid_upto",
-  "token",
   "settings_section",
   "customer_name",
   "cargo_company",
@@ -21,15 +20,19 @@
   "automatic_transfer_start_date",
   "ikas_tag_id",
   "notification_mail",
+  "column_break_aaui",
   "tax_section",
   "tax_category",
-  "taxes"
+  "taxes",
+  "token_tab",
+  "token_valid_upto",
+  "token"
  ],
  "fields": [
   {
    "fieldname": "integration_information_section",
    "fieldtype": "Section Break",
-   "label": "Integration Information"
+   "label": "Integration Keys"
   },
   {
    "fieldname": "store_name",
@@ -48,7 +51,6 @@
   {
    "fieldname": "client_secret",
    "fieldtype": "Password",
-   "in_list_view": 1,
    "label": "Client Secret",
    "reqd": 1
   },
@@ -61,12 +63,13 @@
   {
    "fieldname": "token",
    "fieldtype": "Small Text",
-   "label": "Token"
+   "label": "Token",
+   "read_only": 1
   },
   {
    "fieldname": "settings_section",
    "fieldtype": "Section Break",
-   "label": "Settings"
+   "label": "Integration Defaults"
   },
   {
    "default": "0",
@@ -137,13 +140,27 @@
    "fieldname": "ikas_tag_id",
    "fieldtype": "Data",
    "label": "Ikas Tag Id"
+  },
+  {
+   "fieldname": "general_tab",
+   "fieldtype": "Tab Break",
+   "label": "General"
+  },
+  {
+   "fieldname": "token_tab",
+   "fieldtype": "Tab Break",
+   "label": "Token"
+  },
+  {
+   "fieldname": "column_break_aaui",
+   "fieldtype": "Column Break"
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "issingle": 1,
  "links": [],
- "modified": "2026-06-14 16:17:29.736206",
+ "modified": "2026-06-14 20:29:15.493555",
  "modified_by": "Administrator",
  "module": "Ikas ERPNext",
  "name": "IKAS Settings",

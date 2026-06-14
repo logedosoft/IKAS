@@ -7,6 +7,14 @@ from datetime import datetime, timedelta
 import math
 
 
+def _truncate_error_message(str_message, int_max_length=200):
+	if not str_message:
+		return ""
+	if len(str_message) <= int_max_length:
+		return str_message
+	return str_message[:int_max_length - 3] + "..."
+
+
 def process_ikas_auth(store_name, client_id, client_secret):
 
     # Buraya IKAS API token alma mantığını yaz
@@ -206,6 +214,8 @@ def _process_ikas_staged_order(doc_ecommerce_order):
 	Fetches full order detail if the payload is minimal, then delegates to
 	process_ikas_order for SO creation.
 	"""
+	dctResult = frappe._dict({"op_result": False, "error_type": "GENERIC", "op_message": ""})
+
 	lst_payloads = frappe.get_all(
 		"IKAS Order Payload",
 		filters={"ikas_order": doc_ecommerce_order.name},
@@ -243,16 +253,21 @@ def _process_ikas_staged_order(doc_ecommerce_order):
 
 	doc_json = frappe.as_json(doc_sales_order)
 
-	dct_result = process_ikas_order(doc_ecommerce_order.order_number, doc_json, save_doc=True)
+	dct_process_result = process_ikas_order(doc_ecommerce_order.order_number, doc_json, save_doc=True)
 
-	if not dct_result.get("op_result"):
-		frappe.throw(f"process_ikas_order failed: {dct_result.get('op_message')}")
+	if dct_process_result.get("op_result"):
+		str_so_name = frappe.db.get_value("Sales Order", {"po_no": doc_ecommerce_order.order_number}, "name")
+		if str_so_name:
+			dctResult['op_result'] = True
+			dctResult['sales_order'] = str_so_name
+		else:
+			dctResult['error_type'] = "GENERIC"
+			dctResult['op_message'] = "Sales Order was saved but could not be retrieved by po_no"
+	else:
+		dctResult['error_type'] = dct_process_result.get("error_type", "GENERIC")
+		dctResult['op_message'] = dct_process_result.get("op_message", "")
 
-	str_so_name = frappe.db.get_value("Sales Order", {"po_no": doc_ecommerce_order.order_number}, "name")
-	if not str_so_name:
-		frappe.throw("Sales Order was saved but could not be retrieved by po_no")
-
-	return str_so_name
+	return dctResult
 
 
 def process_staged_orders():
@@ -268,23 +283,31 @@ def process_staged_orders():
 		try:
 			doc = frappe.get_doc("IKAS Order", dct_order.name)
 			doc.status = "Processing"
+			doc.error_type = None
+			doc.error_message = None
 			doc.save(ignore_permissions=True)
 
 			try:
 				if doc.source1 == "IKAS":
-					str_so_name = _process_ikas_staged_order(doc)
-					doc.status = "Completed"
-					doc.sales_order = str_so_name
+					dct_process_result = _process_ikas_staged_order(doc)
+					if dct_process_result.get("op_result"):
+						doc.status = "Completed"
+						doc.sales_order = dct_process_result.get("sales_order")
+					else:
+						doc.error_type = dct_process_result.get("error_type", "GENERIC")
+						doc.error_message = _truncate_error_message(dct_process_result.get("op_message", ""))
+						doc.retry_count = (doc.retry_count or 0) + 1
+						doc.status = "Failed" if doc.retry_count >= 3 else "New"
 				else:
 					doc.status = "Skipped"
+					doc.error_type = "GENERIC"
 					doc.error_message = "No processor for source"
+
 			except Exception as e:
+				doc.error_type = "GENERIC"
+				doc.error_message = _truncate_error_message(str(e))
 				doc.retry_count = (doc.retry_count or 0) + 1
-				doc.error_message = str(e)
-				if doc.retry_count >= 3:
-					doc.status = "Failed"
-				else:
-					doc.status = "New"
+				doc.status = "Failed" if doc.retry_count >= 3 else "New"
 
 			doc.save(ignore_permissions=True)
 		except Exception as e:
@@ -618,13 +641,12 @@ def process_ikas_order(order_id, doc, save_doc=True):
                 if variant_value_names:
                     description += ' ' + variant_value_names
 
-                itemnamesrc = variant.get('sku', '')   # SKU kaynağı
+                itemnamesrc = variant.get('sku')
 
-                # Eğer SKU boşsa direkt hata verelim
                 if not itemnamesrc:
-                    msg = f"SKU bilgisi bulunamadı! Variant: {variant}"
-                    frappe.log_error(msg, "IKAS SKU Hatası")
-                    dctResult['op_message'] = msg
+                    dctResult['op_result'] = False
+                    dctResult['error_type'] = "MISSING_SKU_IN_IKAS"
+                    dctResult['op_message'] = "Product has no SKU in IKAS. Add SKU in IKAS admin."
                     return dctResult
 
                 # SKU ile ERPNext Item arama
@@ -636,9 +658,9 @@ def process_ikas_order(order_id, doc, save_doc=True):
                 )
 
                 if not erp_item:
-                    msg = f"SKU bulunamadı: {itemnamesrc} — ERPNext Item tablosunda eşleşme yok."
-                    frappe.log_error(msg, "IKAS-SKU Eşleşme Hatası")
-                    dctResult['op_message'] = msg
+                    dctResult['op_result'] = False
+                    dctResult['error_type'] = "MISSING_SKU_IN_ERP"
+                    dctResult['op_message'] = f"Product code {itemnamesrc} not found in ERPNext."
                     return dctResult
 
                 # SKU bulunduysa ERPNext bilgilerini kullanarak satır oluştur
@@ -752,7 +774,6 @@ def process_ikas_order(order_id, doc, save_doc=True):
             # Karşılaştırma (ceil uygulanmış değerler üzerinden)
             if totalFinalPrice_rounded != total_amountkontrol:
                 ikas_order_number = order.get('orderNumber', 'Bilinmiyor')
-                send_email = ikas_settings.notification_mail
 
                 # Log kaydı
                 frappe.log_error(
@@ -760,21 +781,8 @@ def process_ikas_order(order_id, doc, save_doc=True):
                     f"IKAS: {totalFinalPrice_rounded}, ERP: {total_amountkontrol}"
                 )
 
-                # E-posta gönder
-                frappe.sendmail(
-                    recipients=[send_email],
-                    subject=f"IKAS-ERP Tutar Uyumsuzluğu: Sipariş {ikas_order_number}",
-                    message=f"""
-                        IKAS Sipariş Numarası: {ikas_order_number} <br>
-                        IKAS Toplam Tutar (Yuvarlanmış): {totalFinalPrice_rounded} <br>
-                        ERP Toplam Tutar (Yuvarlanmış): {total_amountkontrol} <br>
-                        <br>
-                        Lütfen siparişi kontrol ediniz.
-                    """
-                )
-
-               # dctResult['op_message'] = "ERP ve IKAS sipariş tutarı tutarsız, kontrol ediniz."
-              #  return dctResult
+                # dctResult['op_message'] = "ERP ve IKAS sipariş tutarı tutarsız, kontrol ediniz."
+                # return dctResult
 
         except Exception as e:
             frappe.log_error(e, "İtem veya toplam hesaplama hatası")
@@ -794,13 +802,12 @@ def process_ikas_order(order_id, doc, save_doc=True):
                 else:
                     dctResult['op_message'] = "Sipariş bilgileri dolduruldu (veritabanına kaydedilmedi)."
             try:
-                ikas_settings2 = frappe.get_single("IKAS Settings")
-                if getattr(ikas_settings2, "order_auto_confirm", 1):
+                docIKASSettings = frappe.get_single("IKAS Settings")
+                if getattr(docIKASSettings, "order_auto_confirm", 1):
                 # None veya string sorunlarını önlemek için int'e çeviriyoruz
                     frappe.log_error("SO Debug",f"Sales Order Kaydediliyor: {doc.as_dict()}") # Tüm belgeyi logla
-                    order_id_int = int(order_id)
-                    ikas_settings2.last_order_no = order_id_int
-                    ikas_settings2.save(ignore_permissions=True)
+                    docIKASSettings.last_order_no = str(order_id)
+                    docIKASSettings.save(ignore_permissions=True)
 
             except Exception:
                 frappe.log_error(frappe.get_traceback(), f"IKAS Settings last_order_no güncelleme hatası ({order_id})")

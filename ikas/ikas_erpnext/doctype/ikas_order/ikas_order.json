@@ -1,6 +1,6 @@
 {
  "actions": [],
- "allow_rename": 1,
+ "autoname": "autoincrement",
  "creation": "2026-06-14 14:01:04.244069",
  "doctype": "DocType",
  "engine": "InnoDB",
@@ -17,6 +17,7 @@
   "column_break_cuhx",
   "sales_order",
   "retry_count",
+  "error_type",
   "error_message"
  ],
  "fields": [
@@ -45,8 +46,7 @@
    "fieldtype": "Data",
    "in_list_view": 1,
    "label": "Order Number",
-   "reqd": 1,
-   "search_index": 1
+   "reqd": 1
   },
   {
    "fieldname": "ordered_at",
@@ -101,15 +101,21 @@
    "fieldname": "error_message",
    "fieldtype": "Code",
    "label": "Error Message"
+  },
+  {
+   "fieldname": "error_type",
+   "fieldtype": "Data",
+   "label": "Error Type"
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-06-14 14:13:19.847971",
+ "modified": "2026-06-14 22:37:06.762776",
  "modified_by": "Administrator",
  "module": "Ikas ERPNext",
  "name": "IKAS Order",
+ "naming_rule": "Autoincrement",
  "owner": "Administrator",
  "permissions": [
   {
