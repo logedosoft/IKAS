@@ -97,7 +97,7 @@ def get_valid_token():
 
 
 def fetch_ikas_orders():
-	"""Scheduler: fetch IKAS orders by tag into staging docs. Runs every 10 min."""
+	"""Scheduler: fetch IKAS orders into staging docs. Runs every 10 min."""
 	import requests
 
 	settings = frappe.get_single("IKAS Settings")
@@ -105,12 +105,17 @@ def fetch_ikas_orders():
 	if not token:
 		frappe.log_error("IKAS Fetcher", "No valid token available")
 		return 0
-	ikas_tag_id = settings.ikas_tag_id
 	start_date = settings.automatic_transfer_start_date
+	last_order_no = settings.last_order_no or ""
 
 	if not start_date:
 		frappe.log_error("IKAS Fetcher", "automatic_transfer_start_date is not set")
 		return 0
+
+	from datetime import datetime
+	from frappe.utils import getdate
+	dt_start = datetime.combine(getdate(start_date), datetime.min.time())
+	start_date_millis = int(dt_start.timestamp() * 1000)
 
 	api_url = "https://api.myikas.com/api/v1/admin/graphql"
 	headers = {
@@ -119,25 +124,95 @@ def fetch_ikas_orders():
 	}
 
 	lst_new_records = []
-	bln_has_next = True
-	str_cursor = None
-	d_page_count = 0
+	int_page = 1
 	int_max_pages = 50
+	str_highest_order_no = last_order_no
 
-	while bln_has_next and d_page_count < int_max_pages:
-		d_page_count += 1
-		after_clause = f', after: "{str_cursor}"' if str_cursor else ""
+	while int_page <= int_max_pages:
 		query = f"""
 		query {{
-			listOrder(orderTagIds: {{ in: ["{ikas_tag_id}"] }}, first: 50{after_clause}) {{
+			listOrder(
+				orderedAt: {{ gte: {start_date_millis} }}
+				pagination: {{ limit: 50, page: {int_page} }}
+			) {{
 				data {{
 					id
 					orderNumber
 					orderedAt
-				}}
-				pagination {{
-					hasNextPage
-					endCursor
+					totalPrice
+					totalFinalPrice
+					currencyCode
+					status
+					customer {{
+						id
+						email
+						firstName
+						lastName
+						phone
+						isGuestCheckout
+					}}
+					billingAddress {{
+						addressLine1
+						addressLine2
+						city {{ code id name }}
+						company
+						country {{ code id iso2 iso3 name }}
+						district {{ code id name }}
+						firstName
+						id
+						identityNumber
+						lastName
+						phone
+						postalCode
+						state {{ code id name }}
+						taxNumber
+						taxOffice
+					}}
+					shippingAddress {{
+						addressLine1
+						addressLine2
+						city {{ code id name }}
+						company
+						country {{ code id iso2 iso3 name }}
+						district {{ code id name }}
+						firstName
+						id
+						identityNumber
+						lastName
+						phone
+						postalCode
+						state {{ code id name }}
+						taxNumber
+						taxOffice
+					}}
+					orderLineItems {{
+						id
+						createdAt
+						currencyCode
+						discount {{ amount amountType reason }}
+						discountPrice
+						finalPrice
+						price
+						quantity
+						status
+						taxValue
+						variant {{
+							barcodeList
+							brand {{ id name }}
+							id
+							name
+							sku
+							variantValues {{ variantTypeName variantValueName }}
+						}}
+					}}
+					shippingLines {{ price taxValue title }}
+					taxLines {{ price rate }}
+					orderAdjustments {{
+						amount
+						amountType
+						name
+						type
+					}}
 				}}
 			}}
 		}}
@@ -154,34 +229,37 @@ def fetch_ikas_orders():
 			frappe.log_error("IKAS Fetcher GraphQL Error", frappe.as_json(dct_result["errors"]))
 			break
 
-		dct_list_order = dct_result.get("data", {}).get("listOrder", {})
-		lst_orders = dct_list_order.get("data", [])
-		dct_pagination = dct_list_order.get("pagination", {})
+		lst_orders = dct_result.get("data", {}).get("listOrder", {}).get("data", [])
+		if not lst_orders:
+			break
 
 		for dct_order in lst_orders:
 			try:
+				str_order_number = dct_order.get("orderNumber")
+
+				if last_order_no and int(str_order_number) <= int(last_order_no):
+					continue
+
+				bln_exists = frappe.db.exists(
+					"IKAS Order",
+					{"order_number": str_order_number}
+				)
+				if bln_exists:
+					continue
+
 				int_ordered_at = dct_order.get("orderedAt")
 				if isinstance(int_ordered_at, int):
 					dt_ordered = datetime.fromtimestamp(int_ordered_at / 1000)
 				else:
 					continue
 
-				if dt_ordered < datetime.combine(start_date, datetime.min.time()):
-					continue
-
-				str_order_number = dct_order.get("orderNumber")
-				bln_exists = frappe.db.exists(
-					"IKAS Order",
-					{"source1": "IKAS", "source2": ikas_tag_id, "order_number": str_order_number}
-				)
-				if bln_exists:
-					continue
-
 				doc_ikas_order = frappe.new_doc("IKAS Order")
 				doc_ikas_order.source1 = "IKAS"
-				doc_ikas_order.source2 = ikas_tag_id
 				doc_ikas_order.order_number = str_order_number
 				doc_ikas_order.ordered_at = dt_ordered
+				doc_ikas_order.customer_email = dct_order.get("customer", {}).get("email")
+				doc_ikas_order.total_amount = dct_order.get("totalPrice") or 0
+				doc_ikas_order.currency = dct_order.get("currencyCode")
 				doc_ikas_order.status = "New"
 				doc_ikas_order.save(ignore_permissions=True)
 
@@ -192,18 +270,16 @@ def fetch_ikas_orders():
 				doc_payload.save(ignore_permissions=True)
 
 				lst_new_records.append(doc_ikas_order.name)
+				if int(str_order_number) > int(str_highest_order_no or 0):
+					str_highest_order_no = str_order_number
 			except Exception as e:
 				frappe.log_error("IKAS Fetcher Order Error", f"{dct_order.get('orderNumber', '?')}: {e}")
 
-		bln_has_next = dct_pagination.get("hasNextPage", False)
-		str_cursor = dct_pagination.get("endCursor")
+		int_page += 1
 
-		if bln_has_next:
-			import time
-			time.sleep(0.3)
-
-	if d_page_count >= int_max_pages:
-		frappe.log_error("IKAS Fetcher Safety Cap", f"Hit {int_max_pages} pages, stopped pagination")
+	if str_highest_order_no and str_highest_order_no != last_order_no:
+		settings.last_order_no = str_highest_order_no
+		settings.save(ignore_permissions=True)
 
 	return len(lst_new_records)
 
@@ -253,7 +329,7 @@ def _process_ikas_staged_order(doc_ecommerce_order):
 
 	doc_json = frappe.as_json(doc_sales_order)
 
-	dct_process_result = process_ikas_order(doc_ecommerce_order.order_number, doc_json, save_doc=True)
+	dct_process_result = process_ikas_order(doc_ecommerce_order.order_number, doc_json, save_doc=True, order_data=dct_raw)
 
 	if dct_process_result.get("op_result"):
 		str_so_name = frappe.db.get_value("Sales Order", {"po_no": doc_ecommerce_order.order_number}, "name")
@@ -267,6 +343,38 @@ def _process_ikas_staged_order(doc_ecommerce_order):
 		dctResult['error_type'] = dct_process_result.get("error_type", "GENERIC")
 		dctResult['op_message'] = dct_process_result.get("op_message", "")
 
+	return dctResult
+
+
+@frappe.whitelist()
+def process_single_ikas_order(str_docname):
+	dctResult = frappe._dict({"op_result": False, "op_message": ""})
+
+	doc = frappe.get_doc("IKAS Order", str_docname)
+	if doc.source1 != "IKAS":
+		dctResult["op_message"] = "No processor for source"
+		return dctResult
+
+	doc.status = "Processing"
+	doc.error_type = None
+	doc.error_message = None
+	doc.save(ignore_permissions=True)
+
+	dct_process_result = _process_ikas_staged_order(doc)
+
+	if dct_process_result.get("op_result"):
+		doc.status = "Completed"
+		doc.sales_order = dct_process_result.get("sales_order")
+		dctResult["op_result"] = True
+		dctResult["op_message"] = f"Sales Order {doc.sales_order} created."
+	else:
+		doc.error_type = dct_process_result.get("error_type", "GENERIC")
+		doc.error_message = _truncate_error_message(dct_process_result.get("op_message", ""))
+		doc.retry_count = (doc.retry_count or 0) + 1
+		doc.status = "Failed" if doc.retry_count >= 3 else "New"
+		dctResult["op_message"] = doc.error_message
+
+	doc.save(ignore_permissions=True)
 	return dctResult
 
 
@@ -495,7 +603,7 @@ def get_ikas_order_info(order_id):
 
 
 @frappe.whitelist()
-def process_ikas_order(order_id, doc, save_doc=True):
+def process_ikas_order(order_id, doc, save_doc=True, order_data=None):
     """
     IKAS siparişini işler. Hata olursa detay Frappe loguna yazılır,
     kullanıcıya basit bir mesaj döner.
@@ -519,18 +627,24 @@ def process_ikas_order(order_id, doc, save_doc=True):
         ikas_settings = frappe.get_single("IKAS Settings")
 
         customer_name_setting = ikas_settings.customer_name
-        dctOrderInfo = get_ikas_order_info(order_id)
 
-        if not dctOrderInfo.get('op_result'):
-            dctResult['op_message'] = "IKAS sipariş alınamadı."
-            return dctResult
+        if order_data is not None:
+            if isinstance(order_data, str):
+                order_data = json.loads(order_data)
+            order = order_data
+        else:
+            dctOrderInfo = get_ikas_order_info(order_id)
 
-        order_list = dctOrderInfo.get('order_info', {}).get('data', {}).get('listOrder', {}).get('data', [])
-        if not order_list:
-            dctResult['op_message'] = "Sipariş numarası bulunamadı."
-            return dctResult
+            if not dctOrderInfo.get('op_result'):
+                dctResult['op_message'] = "IKAS sipariş alınamadı."
+                return dctResult
 
-        order = order_list[0]
+            order_list = dctOrderInfo.get('order_info', {}).get('data', {}).get('listOrder', {}).get('data', [])
+            if not order_list:
+                dctResult['op_message'] = "Sipariş numarası bulunamadı."
+                return dctResult
+
+            order = order_list[0]
 
         # Daha önce aktarılmış mı
         existing_sos = frappe.get_all("Sales Order", filters={"po_no": order_id}, fields=["name"])
@@ -762,27 +876,22 @@ def process_ikas_order(order_id, doc, save_doc=True):
             # Vergileri yeniden hesapla
             doc.calculate_taxes_and_totals()
 
-            
             totalFinalPrice = float(order.get('totalFinalPrice', 0) or 0)
             totalFinalPrice_rounded = math.ceil(totalFinalPrice)
             erp_grand_total_raw = float(doc.get("grand_total") or 0)
             erp_grand_total = math.ceil(erp_grand_total_raw)
             total_amountkontrol = erp_grand_total
-            
-            
 
-            # Karşılaştırma (ceil uygulanmış değerler üzerinden)
-            if totalFinalPrice_rounded != total_amountkontrol:
+            dDifference = abs(totalFinalPrice_rounded - total_amountkontrol)
+            if dDifference > 5:
                 ikas_order_number = order.get('orderNumber', 'Bilinmiyor')
-
-                # Log kaydı
                 frappe.log_error(
                     f"IKAS-ERP tutar uyumsuzluğu! Sipariş: {ikas_order_number}",
-                    f"IKAS: {totalFinalPrice_rounded}, ERP: {total_amountkontrol}"
+                    f"IKAS: {totalFinalPrice_rounded}, ERP: {total_amountkontrol}, Fark: {dDifference}"
                 )
-
-                # dctResult['op_message'] = "ERP ve IKAS sipariş tutarı tutarsız, kontrol ediniz."
-                # return dctResult
+                dctResult['error_type'] = "Totals Mismatch"
+                dctResult['op_message'] = "IKAS order total amount and generated sales order's total amount doesn't match"
+                return dctResult
 
         except Exception as e:
             frappe.log_error(e, "İtem veya toplam hesaplama hatası")
