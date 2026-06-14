@@ -158,8 +158,11 @@ doctype_js = {
 
 scheduler_events = {
     "cron": {
-        "* * * * *": [
-            "ikas.ikas_utils.process_new_orders"
+        "*/10 * * * *": [
+            "ikas.ikas_utils.fetch_ikas_orders"
+        ],
+        "*/3 * * * *": [
+            "ikas.ikas_utils.process_staged_orders"
         ]
     }
 }

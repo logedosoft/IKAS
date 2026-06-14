@@ -1,0 +1,133 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "creation": "2026-06-14 14:01:04.244069",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "source1",
+  "source2",
+  "source3",
+  "order_number",
+  "ordered_at",
+  "customer_email",
+  "total_amount",
+  "currency",
+  "status",
+  "column_break_cuhx",
+  "sales_order",
+  "retry_count",
+  "error_message"
+ ],
+ "fields": [
+  {
+   "description": "IKAS, Hepsiburada, Trendyol",
+   "fieldname": "source1",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Source 1",
+   "reqd": 1
+  },
+  {
+   "description": "Sub-identifier. Store tag ID or branch name.",
+   "fieldname": "source2",
+   "fieldtype": "Data",
+   "label": "Source 2"
+  },
+  {
+   "fieldname": "source3",
+   "fieldtype": "Data",
+   "label": "Source 3"
+  },
+  {
+   "description": "Platform's own order number",
+   "fieldname": "order_number",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Order Number",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "ordered_at",
+   "fieldtype": "Datetime",
+   "in_list_view": 1,
+   "label": "Ordered At"
+  },
+  {
+   "fieldname": "customer_email",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Customer E-mail"
+  },
+  {
+   "fieldname": "total_amount",
+   "fieldtype": "Currency",
+   "in_list_view": 1,
+   "label": "Total Amount",
+   "options": "currency"
+  },
+  {
+   "fieldname": "currency",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Currency",
+   "options": "Currency"
+  },
+  {
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Status",
+   "options": "New\nProcessing\nCompleted\nFailed\nSkipped"
+  },
+  {
+   "fieldname": "column_break_cuhx",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "sales_order",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Sales Order",
+   "options": "Sales Order"
+  },
+  {
+   "fieldname": "retry_count",
+   "fieldtype": "Int",
+   "label": "Retry Count"
+  },
+  {
+   "fieldname": "error_message",
+   "fieldtype": "Code",
+   "label": "Error Message"
+  }
+ ],
+ "grid_page_length": 50,
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-06-14 14:13:19.847971",
+ "modified_by": "Administrator",
+ "module": "Ikas ERPNext",
+ "name": "IKAS Order",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "row_format": "Dynamic",
+ "rows_threshold_for_grid_search": 20,
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}
