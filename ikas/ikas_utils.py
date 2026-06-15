@@ -657,10 +657,47 @@ def process_ikas_order(order_id, doc, save_doc=True, order_data=None):
             customer_data = order.get('customer', {})
             first_name = customer_data.get('firstName', '')
             last_name = customer_data.get('lastName', '')
-            email_id = customer_data.get('email', '').strip()
+            str_email = customer_data.get('email', '').strip()
+            str_phone = customer_data.get('phone', '').strip()
 
-            address_list = frappe.get_all("Address", filters={"email_id": email_id}, fields=["name"])
-            existing_address_name = address_list[0].name if address_list else None
+            dct_shipping = order.get('shippingAddress', {})
+            str_ship_addr1 = dct_shipping.get('addressLine1', '')
+            str_ship_city = dct_shipping.get('city', {}).get('name', '')
+
+            existing_address_name = frappe.db.get_value(
+                "Address",
+                {
+                    "email_id": str_email,
+                    "phone": str_phone,
+                    "city": str_ship_city,
+                    "address_line1": str_ship_addr1,
+                    "link_doctype": "Customer",
+                    "link_name": customer_name_setting
+                },
+                "name"
+            ) if customer_name_setting else None
+
+            if not existing_address_name:
+                existing_address_name = frappe.db.get_value(
+                    "Address",
+                    {"email_id": str_email, "link_doctype": "Customer", "link_name": customer_name_setting},
+                    "name"
+                ) if customer_name_setting else None
+
+            if not existing_address_name and not customer_name_setting:
+                existing_address_name = frappe.db.get_value(
+                    "Address",
+                    {"email_id": str_email, "link_doctype": "Customer"},
+                    "name"
+                )
+
+            dct_billing = order.get('billingAddress', {})
+            bln_billing_differs = bool(
+                dct_billing and (
+                    dct_billing.get('addressLine1') != dct_shipping.get('addressLine1')
+                    or dct_billing.get('city', {}).get('name') != dct_shipping.get('city', {}).get('name')
+                )
+            )
 
             if customer_name_setting:
                 if existing_address_name:
@@ -675,7 +712,9 @@ def process_ikas_order(order_id, doc, save_doc=True, order_data=None):
                         docAddress.save(ignore_permissions=True)
                     customer_for_order = customer_name_setting
                 else:
-                    create_address(order, customer_name_setting, first_name, last_name)
+                    create_address(order, customer_name_setting, first_name, last_name, "Shipping")
+                    if bln_billing_differs:
+                        create_address(order, customer_name_setting, first_name, last_name, "Billing")
                     customer_for_order = customer_name_setting
             else:
                 if existing_address_name:
@@ -694,7 +733,9 @@ def process_ikas_order(order_id, doc, save_doc=True, order_data=None):
                         docCustomer.customer_type = "Company"
                         docCustomer.customer_group = "Individual"
                         docCustomer.save()
-                        create_address(order, docCustomer.name, first_name, last_name)
+                        create_address(order, docCustomer.name, first_name, last_name, "Shipping")
+                        if bln_billing_differs:
+                            create_address(order, docCustomer.name, first_name, last_name, "Billing")
                         customer_for_order = docCustomer.name
                 else:
                     docCustomer = frappe.new_doc('Customer')
@@ -702,7 +743,9 @@ def process_ikas_order(order_id, doc, save_doc=True, order_data=None):
                     docCustomer.customer_type = "Company"
                     docCustomer.customer_group = "Individual"
                     docCustomer.save()
-                    create_address(order, docCustomer.name, first_name, last_name)
+                    create_address(order, docCustomer.name, first_name, last_name, "Shipping")
+                    if bln_billing_differs:
+                        create_address(order, docCustomer.name, first_name, last_name, "Billing")
                     customer_for_order = docCustomer.name
 
         except Exception as e:
@@ -944,28 +987,53 @@ def process_ikas_order(order_id, doc, save_doc=True, order_data=None):
     return dctResult
 
 
-def create_address(order, customer_name, first_name, last_name,):
-    """Shipping Address oluşturur ve Customer ile ilişkilendirir"""
-    
-    docAddress = frappe.new_doc('Address')
-    docAddress.email_id = order.get('customer', {}).get('email', '')
-    docAddress.address_title = f"{first_name} {last_name}"
-    docAddress.address_type = "Shipping"
-    docAddress.address_line1 = order.get('shippingAddress', {}).get('addressLine1', '')
-    docAddress.state = order.get('shippingAddress', {}).get('district', {}).get('name', '')
-    docAddress.city = order.get('shippingAddress', {}).get('city', {}).get('name', '')
-    country = order.get('shippingAddress', {}).get('country', {}).get('name', '')
-    if country == "Türkiye":
-        country = "Turkey"
-    docAddress.country = country
-    
-    docAddress.phone = order.get('customer', {}).get('phone', '')
+def create_address(order, customer_name, first_name, last_name, address_type="Shipping"):
+    """Create Address with multi-field dedup and self-describing title."""
 
-    docAddress.append("links", {
-        "link_doctype": "Customer",
-        "link_name": customer_name
-    })
-    docAddress.save()
+    dct_customer = order.get('customer', {})
+    str_email = dct_customer.get('email', '').strip()
+    str_phone = dct_customer.get('phone', '').strip()
+
+    if address_type == "Billing":
+        dct_addr = order.get('billingAddress', {})
+    else:
+        dct_addr = order.get('shippingAddress', {})
+
+    str_address_line1 = dct_addr.get('addressLine1', '')
+    str_city = dct_addr.get('city', {}).get('name', 'Bilinmiyor')
+    str_country = dct_addr.get('country', {}).get('name', '')
+    if str_country == "Türkiye":
+        str_country = "Turkey"
+    str_postal_code = dct_addr.get('postalCode', '')
+
+    str_existing = frappe.db.get_value(
+        "Address",
+        {
+            "email_id": str_email,
+            "phone": str_phone,
+            "city": str_city,
+            "address_line1": str_address_line1,
+            "link_doctype": "Customer",
+            "link_name": customer_name
+        },
+        "name"
+    )
+    if str_existing:
+        return str_existing
+
+    docAddress = frappe.new_doc("Address")
+    docAddress.email_id = str_email
+    docAddress.phone = str_phone
+    docAddress.address_title = f"{first_name} {last_name} — {address_type} — {str_city} ({str_phone})"
+    docAddress.address_type = address_type
+    docAddress.address_line1 = str_address_line1
+    docAddress.state = dct_addr.get('district', {}).get('name', '')
+    docAddress.city = str_city
+    docAddress.country = str_country
+
+    docAddress.append("links", {"link_doctype": "Customer", "link_name": customer_name})
+    docAddress.save(ignore_permissions=True)
+    return docAddress.name
 
 
 
