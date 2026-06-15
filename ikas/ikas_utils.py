@@ -858,11 +858,12 @@ def process_ikas_order(order_id, doc, save_doc=True, order_data=None):
                     as_dict=True
                 )
 
-                if tax_row and tax_row.get("account_name"):
-                    account = tax_row.account_name
-                else:
-                    # Eşleşme yoksa default hesap
-                    account = "KDV - 191000"
+                if not tax_row or not tax_row.get("account_name"):
+                    frappe.throw(
+                        f"Tax rate {rate} from IKAS is not mapped in IKAS Tax DocType. "
+                        f"Please map it before processing order {order_id}."
+                    )
+                account = tax_row.account_name
 
                 # Actual tipi ile vergi satırı ekle
                 doc.append("taxes", {
@@ -905,7 +906,7 @@ def process_ikas_order(order_id, doc, save_doc=True, order_data=None):
         try:
             if doc:
                 if save_doc:  # sadece save_doc=True ise kaydet
-                    frappe.log_error("SO info",frappe.as_json(doc)) # Tüm belgeyi logla
+                    frappe.log_error("SO info",f"SO Name: {doc.name}, po_no: {doc.po_no}, Customer: {doc.customer}")
                     doc.save(ignore_permissions=True)
                     dctResult['op_message'] = "Sipariş Başarıyla Kaydedildi."
                 else:
@@ -914,7 +915,7 @@ def process_ikas_order(order_id, doc, save_doc=True, order_data=None):
                 docIKASSettings = frappe.get_single("IKAS Settings")
                 if getattr(docIKASSettings, "order_auto_confirm", 1):
                 # None veya string sorunlarını önlemek için int'e çeviriyoruz
-                    frappe.log_error("SO Debug",f"Sales Order Kaydediliyor: {doc.as_dict()}") # Tüm belgeyi logla
+                    frappe.log_error("SO Debug",f"Sales Order Kaydediliyor - SO Name: {doc.name}, po_no: {doc.po_no}, Customer: {doc.customer}")
                     docIKASSettings.last_order_no = str(order_id)
                     docIKASSettings.save(ignore_permissions=True)
 
@@ -922,7 +923,7 @@ def process_ikas_order(order_id, doc, save_doc=True, order_data=None):
                 frappe.log_error(frappe.get_traceback(), f"IKAS Settings last_order_no güncelleme hatası ({order_id})")
         except Exception as e:
             import traceback
-            frappe.log_error("SO Debug",doc.as_dict()) # Tüm belgeyi logla
+            frappe.log_error("SO Debug",f"SO Name: {doc.name}, po_no: {doc.po_no}, Customer: {doc.customer} - exception below")
             frappe.log_error(f"{str(e)}\n{traceback.format_exc()}", f"Sales Order kaydetme hatası - Order: {order_id}")
 
 
@@ -938,7 +939,7 @@ def process_ikas_order(order_id, doc, save_doc=True, order_data=None):
         if 'traceback' in dctResult:
             log_message += "\n" + dctResult['traceback'] 
         frappe.log_error(log_title,log_message)
-        frappe.log_error("SO Debug",f"Sales Order Kaydediliyor: {doc.as_dict()}") # Tüm belgeyi logla
+        frappe.log_error("SO Debug",f"Sales Order Kaydediliyor - SO Name: {doc.name}, po_no: {doc.po_no}, Customer: {doc.customer}")
 
     return dctResult
 
