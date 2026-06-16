@@ -222,7 +222,7 @@ def fetch_ikas_orders():
 			response.raise_for_status()
 			dct_result = response.json()
 		except Exception as e:
-			frappe.log_error("IKAS Fetcher API Error", str(e))
+			frappe.log_error("IKAS Fetcher API Error", frappe.get_traceback())
 			break
 
 		if "errors" in dct_result:
@@ -413,7 +413,7 @@ def process_staged_orders():
 
 			except Exception as e:
 				doc.error_type = "GENERIC"
-				doc.error_message = _truncate_error_message(str(e))
+				doc.error_message = _truncate_error_message(frappe.get_traceback())
 				doc.retry_count = (doc.retry_count or 0) + 1
 				doc.status = "Failed" if doc.retry_count >= 3 else "New"
 
@@ -749,7 +749,7 @@ def process_ikas_order(order_id, doc, save_doc=True, order_data=None):
                     customer_for_order = docCustomer.name
 
         except Exception as e:
-            frappe.log_error(e, "Müşteri/Adres oluşturma hatası")
+            frappe.log_error("Müşteri/Adres oluşturma hatası", frappe.get_traceback())
             dctResult['op_message'] = "Müşteri veya adres oluşturulamadı, destek ile iletişime geçin."
             return dctResult
 
@@ -780,7 +780,7 @@ def process_ikas_order(order_id, doc, save_doc=True, order_data=None):
             doc.delivery_date = date
             doc.po_date = date
         except Exception as e:
-            frappe.log_error(e, "Doc alanları setleme hatası")
+            frappe.log_error("Doc alanları setleme hatası", frappe.get_traceback())
             dctResult['op_message'] = "Sipariş alanları ayarlanamadı, destek ile iletişime geçin."
             return dctResult
 
@@ -938,7 +938,7 @@ def process_ikas_order(order_id, doc, save_doc=True, order_data=None):
                 return dctResult
 
         except Exception as e:
-            frappe.log_error(e, "İtem veya toplam hesaplama hatası")
+            frappe.log_error("İtem veya toplam hesaplama hatası", frappe.get_traceback())
             dctResult['op_message'] = "Sipariş kalemleri işlenemedi, destek ile iletişime geçin."
             return dctResult
 
@@ -963,17 +963,16 @@ def process_ikas_order(order_id, doc, save_doc=True, order_data=None):
                     docIKASSettings.save(ignore_permissions=True)
 
             except Exception:
-                frappe.log_error(frappe.get_traceback(), f"IKAS Settings last_order_no güncelleme hatası ({order_id})")
+                frappe.log_error(f"IKAS Settings last_order_no güncelleme hatası ({order_id})", frappe.get_traceback())
         except Exception as e:
-            import traceback
             frappe.log_error("SO Debug",f"SO Name: {doc.name}, po_no: {doc.po_no}, Customer: {doc.customer} - exception below")
-            frappe.log_error(f"{str(e)}\n{traceback.format_exc()}", f"Sales Order kaydetme hatası - Order: {order_id}")
+            frappe.log_error(f"Sales Order kaydetme hatası - Order: {order_id}", frappe.get_traceback())
 
 
         return dctResult
 
     except Exception as e:
-        frappe.log_error(e, "Genel process_ikas_order hatası")
+        frappe.log_error("Genel process_ikas_order hatası", frappe.get_traceback())
         dctResult['op_message'] = "Sipariş işleme sırasında bir hata oluştu, destek ile iletişime geçin."
     finally:
         # Tüm durumları logla
@@ -1063,7 +1062,7 @@ def get_ikas_auth_token_py():
 		dctResult["op_message"] = "Access Token alındı ve IKAS Settings kaydedildi."
 		dctResult["auth_token"] = str_token
 	except Exception as e:
-		frappe.log_error(title="IKAS Token Error", message=str(e))
+		frappe.log_error(title="IKAS Token Error", message=frappe.get_traceback())
 		dctResult["op_message"] = f"Token alınırken hata oluştu: {str(e)}"
 
 	return dctResult
