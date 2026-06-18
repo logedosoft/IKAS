@@ -258,7 +258,7 @@ def fetch_ikas_orders():
 				doc_ikas_order.order_number = str_order_number
 				doc_ikas_order.ordered_at = dt_ordered
 				doc_ikas_order.customer_email = dct_order.get("customer", {}).get("email")
-				doc_ikas_order.total_amount = dct_order.get("totalPrice") or 0
+				doc_ikas_order.total_amount = dct_order.get("totalFinalPrice") or 0
 				doc_ikas_order.currency = dct_order.get("currencyCode")
 				doc_ikas_order.status = "New"
 				doc_ikas_order.save(ignore_permissions=True)
@@ -358,6 +358,7 @@ def process_single_ikas_order(str_docname):
 	doc.status = "Processing"
 	doc.error_type = None
 	doc.error_message = None
+	doc.retry_count = 0
 	doc.save(ignore_permissions=True)
 
 	dct_process_result = _process_ikas_staged_order(doc)
@@ -786,17 +787,15 @@ def process_ikas_order(order_id, doc, save_doc=True, order_data=None):
             if billing_address_name:
                 doc.billing_address_name = billing_address_name
             doc.po_no = order_id
-            #custom_ld_sales_person kayaoğluna zorunlu
             doc.custom_ld_sales_person = ikas_settings.custom_ld_sales_person
-            #custom_ld_vehicle kayaoğluna zorunlu
+
             str_vehicle = getattr(ikas_settings, 'custom_ld_vehicle', None)
             if not str_vehicle:
                 str_vehicle = frappe.db.get_value("Vehicle", {}, "name")
             if str_vehicle:
                 doc.custom_ld_vehicle = str_vehicle
-            #vergi alanı için
+            # Tax category setting
             doc.tax_category = ikas_settings.tax_category
-            #payment_terms_template kayaoğluna zorunlu
             doc.payment_terms_template = ikas_settings.payment_terms_template
 
             ordered_at = order.get('orderedAt', '')
