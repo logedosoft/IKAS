@@ -16,9 +16,9 @@ def _truncate_error_message(str_message, int_max_length=200):
 
 
 def process_ikas_auth(store_name, client_id, client_secret):
+    import requests
 
     # Buraya IKAS API token alma mantığını yaz
-    import requests
     api_url = f"{store_name}"
     headers = {'Content-Type': 'application/x-www-form-urlencoded'}
     payload = {
@@ -44,6 +44,8 @@ def get_valid_token():
 	server-restart resilience. Uses a distributed lock to prevent
 	multiple workers from refreshing simultaneously.
 	"""
+	import time
+
 	str_cache_key = "ikas_access_token"
 	token = frappe.cache().get_value(str_cache_key)
 	if token:
@@ -51,7 +53,6 @@ def get_valid_token():
 
 	str_lock_key = "ikas_token_refresh_lock"
 	if frappe.cache().get_value(str_lock_key):
-		import time
 		time.sleep(1)
 		token = frappe.cache().get_value(str_cache_key)
 		if token:
@@ -99,6 +100,8 @@ def get_valid_token():
 def fetch_ikas_orders():
 	"""Scheduler: fetch IKAS orders into staging docs. Runs every 10 min."""
 	import requests
+	from datetime import datetime
+	from frappe.utils import getdate
 
 	settings = frappe.get_single("IKAS Settings")
 	token = get_valid_token()
@@ -112,8 +115,6 @@ def fetch_ikas_orders():
 		frappe.log_error("IKAS Fetcher", "automatic_transfer_start_date is not set")
 		return 0
 
-	from datetime import datetime
-	from frappe.utils import getdate
 	dt_start = datetime.combine(getdate(start_date), datetime.min.time())
 	start_date_millis = int(dt_start.timestamp() * 1000)
 
