@@ -16,9 +16,9 @@ def _truncate_error_message(str_message, int_max_length=200):
 
 
 def process_ikas_auth(store_name, client_id, client_secret):
+    import requests
 
     # Buraya IKAS API token alma mantığını yaz
-    import requests
     api_url = f"{store_name}"
     headers = {'Content-Type': 'application/x-www-form-urlencoded'}
     payload = {
@@ -44,6 +44,8 @@ def get_valid_token():
 	server-restart resilience. Uses a distributed lock to prevent
 	multiple workers from refreshing simultaneously.
 	"""
+	import time
+
 	str_cache_key = "ikas_access_token"
 	token = frappe.cache().get_value(str_cache_key)
 	if token:
@@ -51,7 +53,6 @@ def get_valid_token():
 
 	str_lock_key = "ikas_token_refresh_lock"
 	if frappe.cache().get_value(str_lock_key):
-		import time
 		time.sleep(1)
 		token = frappe.cache().get_value(str_cache_key)
 		if token:
@@ -99,6 +100,8 @@ def get_valid_token():
 def fetch_ikas_orders():
 	"""Scheduler: fetch IKAS orders into staging docs. Runs every 10 min."""
 	import requests
+	from datetime import datetime
+	from frappe.utils import getdate
 
 	settings = frappe.get_single("IKAS Settings")
 	token = get_valid_token()
@@ -112,8 +115,6 @@ def fetch_ikas_orders():
 		frappe.log_error("IKAS Fetcher", "automatic_transfer_start_date is not set")
 		return 0
 
-	from datetime import datetime
-	from frappe.utils import getdate
 	dt_start = datetime.combine(getdate(start_date), datetime.min.time())
 	start_date_millis = int(dt_start.timestamp() * 1000)
 
@@ -258,7 +259,7 @@ def fetch_ikas_orders():
 				doc_ikas_order.order_number = str_order_number
 				doc_ikas_order.ordered_at = dt_ordered
 				doc_ikas_order.customer_email = dct_order.get("customer", {}).get("email")
-				doc_ikas_order.total_amount = dct_order.get("totalPrice") or 0
+				doc_ikas_order.total_amount = dct_order.get("totalFinalPrice") or 0
 				doc_ikas_order.currency = dct_order.get("currencyCode")
 				doc_ikas_order.status = "New"
 				doc_ikas_order.save(ignore_permissions=True)
@@ -358,6 +359,7 @@ def process_single_ikas_order(str_docname):
 	doc.status = "Processing"
 	doc.error_type = None
 	doc.error_message = None
+	doc.retry_count = 0
 	doc.save(ignore_permissions=True)
 
 	dct_process_result = _process_ikas_staged_order(doc)
@@ -602,6 +604,32 @@ def get_ikas_order_info(order_id):
     return dctResult
 
 
+def _find_linked_address(dct_addr_filters, str_link_doctype=None, str_link_name=None):
+    """Find Address matching dct_addr_filters, optionally linked via Dynamic Link.
+
+    link_doctype/link_name live on tabDynamic Link, NOT on tabAddress.
+    We first resolve linked Address names, then filter Address by its own columns.
+    """
+    bln_has_link = str_link_doctype is not None
+    if bln_has_link:
+        dct_link = {"parenttype": "Address", "link_doctype": str_link_doctype}
+        if str_link_name:
+            dct_link["link_name"] = str_link_name
+        lst_linked = frappe.get_all("Dynamic Link", filters=dct_link, fields=["parent"])
+        lst_names = [d.parent for d in lst_linked]
+        if not lst_names:
+            str_address_name = None
+        else:
+            dct_local = dict(dct_addr_filters)
+            dct_local["name"] = ["in", lst_names]
+            str_address_name = frappe.db.get_value("Address", dct_local, "name")
+    else:
+        str_address_name = frappe.db.get_value("Address", dct_addr_filters, "name")
+    return str_address_name
+
+
+
+
 @frappe.whitelist()
 def process_ikas_order(order_id, doc, save_doc=True, order_data=None):
     """
@@ -649,6 +677,7 @@ def process_ikas_order(order_id, doc, save_doc=True, order_data=None):
         # Daha önce aktarılmış mı
         existing_sos = frappe.get_all("Sales Order", filters={"po_no": order_id}, fields=["name"])
         if existing_sos:
+            dctResult['op_result'] = True
             dctResult['op_message'] = f"Bu sipariş zaten aktarılmış: {existing_sos[0].name}"
             return dctResult
 
@@ -664,31 +693,21 @@ def process_ikas_order(order_id, doc, save_doc=True, order_data=None):
             str_ship_addr1 = dct_shipping.get('addressLine1', '')
             str_ship_city = dct_shipping.get('city', {}).get('name', '')
 
-            existing_address_name = frappe.db.get_value(
-                "Address",
-                {
-                    "email_id": str_email,
-                    "phone": str_phone,
-                    "city": str_ship_city,
-                    "address_line1": str_ship_addr1,
-                    "link_doctype": "Customer",
-                    "link_name": customer_name_setting
-                },
-                "name"
+            existing_address_name = _find_linked_address(
+                {"email_id": str_email, "phone": str_phone, "city": str_ship_city, "address_line1": str_ship_addr1},
+                "Customer", customer_name_setting
             ) if customer_name_setting else None
 
             if not existing_address_name:
-                existing_address_name = frappe.db.get_value(
-                    "Address",
-                    {"email_id": str_email, "link_doctype": "Customer", "link_name": customer_name_setting},
-                    "name"
+                existing_address_name = _find_linked_address(
+                    {"email_id": str_email},
+                    "Customer", customer_name_setting
                 ) if customer_name_setting else None
 
             if not existing_address_name and not customer_name_setting:
-                existing_address_name = frappe.db.get_value(
-                    "Address",
-                    {"email_id": str_email, "link_doctype": "Customer"},
-                    "name"
+                existing_address_name = _find_linked_address(
+                    {"email_id": str_email},
+                    "Customer"
                 )
 
             dct_billing = order.get('billingAddress', {})
@@ -699,6 +718,7 @@ def process_ikas_order(order_id, doc, save_doc=True, order_data=None):
                 )
             )
 
+            billing_address_name = None
             if customer_name_setting:
                 if existing_address_name:
                     docAddress = frappe.get_doc("Address", existing_address_name)
@@ -711,10 +731,13 @@ def process_ikas_order(order_id, doc, save_doc=True, order_data=None):
                         })
                         docAddress.save(ignore_permissions=True)
                     customer_for_order = customer_name_setting
-                else:
-                    create_address(order, customer_name_setting, first_name, last_name, "Shipping")
+                    shipping_address_name = existing_address_name
                     if bln_billing_differs:
-                        create_address(order, customer_name_setting, first_name, last_name, "Billing")
+                        billing_address_name = create_address(order, customer_name_setting, first_name, last_name, "Billing")
+                else:
+                    shipping_address_name = create_address(order, customer_name_setting, first_name, last_name, "Shipping")
+                    if bln_billing_differs:
+                        billing_address_name = create_address(order, customer_name_setting, first_name, last_name, "Billing")
                     customer_for_order = customer_name_setting
             else:
                 if existing_address_name:
@@ -727,15 +750,18 @@ def process_ikas_order(order_id, doc, save_doc=True, order_data=None):
 
                     if existing_customer:
                         customer_for_order = existing_customer
+                        shipping_address_name = existing_address_name
+                        if bln_billing_differs:
+                            billing_address_name = create_address(order, existing_customer, first_name, last_name, "Billing")
                     else:
                         docCustomer = frappe.new_doc('Customer')
                         docCustomer.customer_name = f"{first_name} {last_name.strip()}"
                         docCustomer.customer_type = "Company"
                         docCustomer.customer_group = "Individual"
                         docCustomer.save()
-                        create_address(order, docCustomer.name, first_name, last_name, "Shipping")
+                        shipping_address_name = create_address(order, docCustomer.name, first_name, last_name, "Shipping")
                         if bln_billing_differs:
-                            create_address(order, docCustomer.name, first_name, last_name, "Billing")
+                            billing_address_name = create_address(order, docCustomer.name, first_name, last_name, "Billing")
                         customer_for_order = docCustomer.name
                 else:
                     docCustomer = frappe.new_doc('Customer')
@@ -743,9 +769,9 @@ def process_ikas_order(order_id, doc, save_doc=True, order_data=None):
                     docCustomer.customer_type = "Company"
                     docCustomer.customer_group = "Individual"
                     docCustomer.save()
-                    create_address(order, docCustomer.name, first_name, last_name, "Shipping")
+                    shipping_address_name = create_address(order, docCustomer.name, first_name, last_name, "Shipping")
                     if bln_billing_differs:
-                        create_address(order, docCustomer.name, first_name, last_name, "Billing")
+                        billing_address_name = create_address(order, docCustomer.name, first_name, last_name, "Billing")
                     customer_for_order = docCustomer.name
 
         except Exception as e:
@@ -757,15 +783,20 @@ def process_ikas_order(order_id, doc, save_doc=True, order_data=None):
         try:
             doc.customer = customer_for_order
             doc.customer_name = customer_for_order
-            doc.customer_address = f"{first_name} {last_name.strip()}-Shipping"
-            #shipping_address_name kayaoğluna zorunlu
-            doc.shipping_address_name= f"{first_name} {last_name.strip()}-Shipping"
+            doc.shipping_address_name = shipping_address_name
+            doc.customer_address = shipping_address_name
+            if billing_address_name:
+                doc.billing_address_name = billing_address_name
             doc.po_no = order_id
-            #custom_ld_sales_person kayaoğluna zorunlu
             doc.custom_ld_sales_person = ikas_settings.custom_ld_sales_person
-            #vergi alanı için
+
+            str_vehicle = getattr(ikas_settings, 'custom_ld_vehicle', None)
+            if not str_vehicle:
+                str_vehicle = frappe.db.get_value("Vehicle", {}, "name")
+            if str_vehicle:
+                doc.custom_ld_vehicle = str_vehicle
+            # Tax category setting
             doc.tax_category = ikas_settings.tax_category
-            #payment_terms_template kayaoğluna zorunlu
             doc.payment_terms_template = ikas_settings.payment_terms_template
 
             ordered_at = order.get('orderedAt', '')
@@ -942,8 +973,6 @@ def process_ikas_order(order_id, doc, save_doc=True, order_data=None):
             dctResult['op_message'] = "Sipariş kalemleri işlenemedi, destek ile iletişime geçin."
             return dctResult
 
-        dctResult['op_result'] = True
-        
         dctResult['doc'] = doc.as_dict()
 
         try:
@@ -951,8 +980,10 @@ def process_ikas_order(order_id, doc, save_doc=True, order_data=None):
                 if save_doc:  # sadece save_doc=True ise kaydet
                     frappe.log_error("SO info",f"SO Name: {doc.name}, po_no: {doc.po_no}, Customer: {doc.customer}")
                     doc.save(ignore_permissions=True)
+                    dctResult['op_result'] = True
                     dctResult['op_message'] = "Sipariş Başarıyla Kaydedildi."
                 else:
+                    dctResult['op_result'] = True
                     dctResult['op_message'] = "Sipariş bilgileri dolduruldu (veritabanına kaydedilmedi)."
             try:
                 docIKASSettings = frappe.get_single("IKAS Settings")
@@ -965,9 +996,15 @@ def process_ikas_order(order_id, doc, save_doc=True, order_data=None):
             except Exception:
                 frappe.log_error(f"IKAS Settings last_order_no güncelleme hatası ({order_id})", frappe.get_traceback())
         except Exception as e:
+            dctResult['op_result'] = False
+            dctResult['op_message'] = f"Sales Order kaydetme hatası: {str(e)}"
             frappe.log_error("SO Debug",f"SO Name: {doc.name}, po_no: {doc.po_no}, Customer: {doc.customer} - exception below")
             frappe.log_error(f"Sales Order kaydetme hatası - Order: {order_id}", frappe.get_traceback())
 
+
+        # Safety: op_message must never be empty when op_result is False
+        if not dctResult.get('op_result') and not dctResult.get('op_message'):
+            dctResult['op_message'] = "Sipariş işlenemedi ancak detaylı hata mesajı alınamadı."
 
         return dctResult
 
@@ -980,8 +1017,12 @@ def process_ikas_order(order_id, doc, save_doc=True, order_data=None):
         log_message = dctResult['op_message']
         if 'traceback' in dctResult:
             log_message += "\n" + dctResult['traceback'] 
-        frappe.log_error(log_title,log_message)
-        frappe.log_error("SO Debug",f"Sales Order Kaydediliyor - SO Name: {doc.name}, po_no: {doc.po_no}, Customer: {doc.customer}")
+        frappe.log_error(log_title, log_message)
+        try:
+            if doc:
+                frappe.log_error("SO Debug", f"SO Name: {doc.name}, po_no: {doc.po_no}, Customer: {doc.customer}")
+        except Exception:
+            pass
 
     return dctResult
 
@@ -1005,17 +1046,15 @@ def create_address(order, customer_name, first_name, last_name, address_type="Sh
         str_country = "Turkey"
     str_postal_code = dct_addr.get('postalCode', '')
 
-    str_existing = frappe.db.get_value(
-        "Address",
+    str_existing = _find_linked_address(
         {
             "email_id": str_email,
             "phone": str_phone,
             "city": str_city,
-            "address_line1": str_address_line1,
-            "link_doctype": "Customer",
-            "link_name": customer_name
+            "address_line1": str_address_line1
         },
-        "name"
+        "Customer",
+        customer_name
     )
     if str_existing:
         return str_existing
